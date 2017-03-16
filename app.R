@@ -1,9 +1,14 @@
 library(shiny)
 
-Sweave('~/Dropbox/Harvard/MeltonProteomics/ds_functions_21JAN17.Rnw')
-Sweave('~/Dropbox/Harvard/MeltonRNAseq/ds_rnaseqAnalysis_5MAR17.Rnw')
-Sweave('~/Dropbox/Harvard/MeltonProteomics/ds_analysis_21JAN17.Rnw')
-Sweave('~/Dropbox/Harvard/MeltonProteomics/ds_analysis_A_2FEB17.Rnw')
+mylibs <- Sys.getenv('J_LIBS')
+if (is.na(mylibs) || mylibs == '') {
+    mylibs <- '~/Dropbox/Harvard'
+}
+
+Sweave(file.path(mylibs,'MeltonProteomics','ds_functions_21JAN17.Rnw')
+Sweave(file.path(mylibs,'MeltonRNAseq','ds_rnaseqAnalysis_5MAR17.Rnw')
+Sweave(file.path(mylibs,'MeltonProteomics','ds_analysis_21JAN17.Rnw')
+Sweave(file.path(mylibs,'MeltonProteomics','ds_analysis_A_2FEB17.Rnw')
 
 acclst <- list(s227=r227.df$Accession, s238=r238.df$Accession, s239=r239.df$Accession, s243=r243.df$Accession) # rows WITHOUT QUANTITATION REMOVED
 xl <-  makeSubsetExprMatrix(1, adat.lst) # adat.lst in resources:label=msnsetfromsubsets, EACH data.frame HAS ADDITIONAL FEATURES COLUMN (don't confuse with acclst)
