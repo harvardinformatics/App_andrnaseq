@@ -1,0 +1,990 @@
+\documentclass[a4paper]{article}
+\usepackage{Sweave}
+\begin{document}
+
+\title{}
+\author{}
+
+\maketitle
+
+<<label=libraries, echo=FALSE, eval=TRUE>>=
+library(plyr)
+library(MSnbase)
+
+quartz.options(width=5, height=5)
+options(editor="/usr/bin/vim")
+options(stringsAsFactors=FALSE)
+
+USEPATH <- '~/Dropbox/Harvard/MeltonProteomics'
+UP1PATH <- '~/Dropbox/Harvard'
+
+SERVER <- '/srv/shiny-server/DimaApp'
+SERVERPROT <- '/srv/shiny-server/DimaApp/MeltonProteomics'
+
+#Sweave(paste(USEPATH, 'ds_functions_21JAN17.Rnw', sep='/') # D031517: not necessary when running app
+
+# REMOVE ROWS without quantitation
+rmNoQuant <- function(df) {
+    # removes all rows from data.set without quantitation
+    # df: sample data.frame, eg, x227.df
+    ix <- grep('Abundance\\.\\.|Abundances\\.Count', colnames(df))
+    xdf <- df[,ix]
+    xl <- apply(xdf, 1, function(x) all(is.na(x)))
+    df[!xl,]
+}
+
+imputeNormalizeTransform <- function(set, method='MLE') {
+    # set: a MSnSet object
+    # method: 
+    iset <- impute(set, method)
+    nset <- normalize(iset, 'quantiles')
+    
+    #nmres.max <- normalise(ires, "max")
+    #nsres.sum <- normalise(ires, "sum")
+    #nqrires.qrob <- normalise(ires, "quantiles.robust")
+    #nvres.vsn <- normalise(ires, "vsn")
+
+    exprs(nset) <- log10(exprs(nset))
+    return(nset)
+}
+
+.plot <- function(x,ttl=NULL) {
+  boxplot(exprs(x),
+          main=ifelse(is.null(ttl),processingData(x)@processing[2],ttl),
+          cex.main=.8,
+          cex.lab=.5,
+          cex.axis=.5,
+          cex=.8, las=2)
+  grid()
+}
+
+@ 
+<<label=load, echo=FALSE, eval=TRUE>>=
+## error opening 160621LDSSAM01867_227-2T6plx-FTK1-60_NOT_Normalized_PD22.xlsx with ooffice to convert to text file
+## used pandas python module, see Res/pythonHOWTOs
+x227.df <- read.csv(paste(SERVERPROT, 'RawData/160621LDSSAM01867_227-2T6plx-FTK1-60_NOT_Normalized_PD22.csv', sep='/'))
+x238.df <- read.table(paste(SERVERPROT, 'RawData/160816LDSSAM01867_238BT6plx-FTK1-60_NewDB.csv', sep='/'),
+                   header=TRUE, quote='', sep='\t', fill=TRUE, comment.char='')
+x239.df <- read.table(paste(SERVERPROT, 'RawData/160908LDSSAM01867_239T6plx-FTK1-60_UniprotHuman.csv', sep='/'),
+                   header=TRUE, quote='', sep='\t', fill=TRUE, comment.char='')
+x243.df <- read.table(paste(SERVERPROT, 'RawData/160922LDSSAM01867_243T6plx-FTK1-60_UniprotHuman2.csv', sep='/'),
+                   header=TRUE, quote='', sep='\t', fill=TRUE, comment.char='')
+
+write.table(x227.df, file=paste(SERVERPROT, 'TempData/x227.txt', sep='/'), quote=FALSE, sep='\t')
+write.table(x238.df, file=paste(SERVERPROT, 'TempData/x238.txt', sep='/'), quote=FALSE, sep='\t')
+write.table(x239.df, file=paste(SERVERPROT, 'TempData/x239.txt', sep='/'), quote=FALSE, sep='\t')
+write.table(x243.df, file=paste(SERVERPROT, 'TempData/x243.txt', sep='/'), quote=FALSE, sep='\t')
+
+notprocessedsplelist <- list(S227=x227.df, S238=x238.df, S239=x239.df, S243=x243.df)
+
+@ 
+%% ====== ANNOTATION HASH ======
+%% ++++++ OLD TEMPORARY HASHES ++++++
+%% temporary! hash for sample 238 only
+%% use label=lookupsymbolwithaccD2717 to annotate all samples
+<<label=proteinannotD13117, echo=FALSE, eval=FALSE>>=
+# lookup files generated with python script Python/getProtAnnotv2.py
+# system(python Python/getProtAnnotv2.py) will print usage message
+# lookup files are:
+# SERVERPROT/RawData/upAccession2GeneSymbol
+# SERVERPROT/RawData/upAccession2upProtName
+
+gs <- read.table(paste(SERVERPROT, 'RawData/upAccession2GeneSymbol', sep='/'), header=FALSE, sep='\t', quote='', fill=TRUE)
+colnames(gs) <- NULL
+pn <- read.table(paste(SERVERPROT, 'RawData/upAccession2upProtName', sep='/'), header=FALSE, sep='\t', quote='', fill=TRUE)
+colnames(pn) <- NULL
+
+egs <- new.env(hash=TRUE)
+apply(gs, 1, function(x)  egs[[x[1]]] <- x[2])
+
+epn <- new.env(hash=TRUE)
+apply(pn, 1, function(x)  epn[[x[1]]] <- x[2])
+
+# checking
+a <- sample(gs[, 1], 10)
+gns <- unlist(mget(a, egs, ifnotfound=NA))
+ptn <- unlist(mget(a, epn, ifnotfound=NA))
+
+@ 
+% obsolete !
+<<label=lookupsymbolwithaccD2717, echo=FALSE, eval=FALSE>>=
+gs <- read.table(paste(SERVERPROT, 'RawData/upAccession2GeneSymbol27383943', sep='/'), header=FALSE, sep='\t', quote='', fill=TRUE)
+colnames(gs) <- NULL
+
+egs <- new.env(hash=TRUE)
+apply(gs, 1, function(x)  egs[[x[1]]] <- x[2])
+
+@ 
+% obsolete!
+<<label=lookupnamewithaccD21517, echo=FALSE, eval=FALSE>>=
+pn <- read.table(paste(SERVERPROT, 'RawData/upAccession2upProtName', sep='/'), header=FALSE, sep='\t', quote='', fill=TRUE)
+colnames(pn) <- NULL
+
+epn <- new.env(hash=TRUE)
+apply(pn, 1, function(x)  epn[[x[1]]] <- x[2])
+
+@ 
+% obsolete!
+<<label=lookupaccwithsymbolD1417, echo=FALSE, eval=FALSE>>=
+eacc <- new.env(hash=TRUE)
+apply(gs, 1, function(x) eacc[[x[2]]] <- x[1])
+
+@ 
+%% ====== PERMANENT HASHES ======
+% modified D22117: added gsnosym
+<<label=proteinannotationsD22017, echo=FALSE, eval=TRUE, >>=
+# annotation files generated with python script Python/getProtAnnotUniprotv1.py
+# output of getProtAnnotUniprotv1.py in RawData/idAnnotWithUniProt
+require(geneSynonym)
+gs <- read.table(paste(SERVERPROT, 'RawData/idAnnotWithUniProt20FEB17', sep='/'), header=TRUE, sep='\t', quote='', fill=TRUE)
+colnames(gs) <- NULL
+
+hasnosym <- apply(gs, 1, function(x) ifelse(x[2] == '', TRUE, FALSE)) # 1832 without symbol
+gsnosym <- gs[hasnosym,] # still useful for eacc2name, see below D22117
+write.table(gs[hasnosym,], file=paste(SERVERPROT, 'Python/protaccWithoutSymbol', sep='/') , quote=FALSE, sep='\t')
+gs <- gs[!hasnosym,] # 11027 proteins with symbols
+# added D22617: some symbols are strings of symbols separated by ';'
+gs[,2] <- sapply(gs[,2], function(x) as.character(unlist(strsplit(x, split=';')))[1])
+
+makegenehash <- FALSE
+if (makegenehash) {# takes time! therefore save object so it needn't recreated every time it's used
+    ## aliases from Entrez Gene
+    genealias <- apply(gs, 1, function(x) {
+        y <- as.character(unlist(humanSyno(x[2])))
+        data.frame(acc=rep(x[1], length(y)), sym=rep(x[2], length(y)), alias=y)
+    })
+    genealias.df <- do.call(rbind, genealias)
+    rownames(genealias.df) <- NULL
+    save(genealias.df, file='genealias.rdat')
+    write.table(genealias.df, file=paste(SERVERPROT, 'Python/genealiases.txt', sep='/'), row.names=FALSE, quote=FALSE)
+}
+ 
+if (FALSE) {
+    ## aliases from UniProt(gs)
+    xals.df <- gs[,1:3]
+    upals <- apply(xals.df, 1, function(x) {
+        y <- unlist(strsplit(x[3], split=' '))
+        data.frame(acc=rep(x[1], length(y)), sym=rep(x[2], length(y)), alias=y)
+    })
+    upals.df <- do.call(rbind, upals)
+    save(upals.df, file='upals.rdat')
+}
+
+load(paste(SERVERPROT, 'genealias.rdat', sep='/'))
+load(paste(SERVERPROT, 'upals.rdat', sep='/'))
+
+# hashes
+eacc2sym <- new.env(hash=TRUE)
+apply(gs, 1, function(x)  eacc2sym[[x[1]]] <- x[2])
+
+ealias2sym <- new.env(hash=TRUE)
+apply(genealias.df, 1, function(x)  ealias2sym[[x[3]]] <- x[2])
+apply(upals.df, 1, function(x)  ealias2sym[[x[3]]] <- x[2])
+
+ealias2acc <- new.env(hash=TRUE)
+apply(genealias.df, 1, function(x)  ealias2acc[[x[3]]] <- x[1])
+apply(upals.df, 1, function(x)  ealias2acc[[x[3]]] <- x[1])
+
+eacc2name <- new.env(hash=TRUE)
+apply(gs, 1, function(x)  eacc2name[[x[1]]] <- x[4])
+apply(gsnosym, 1, function(x)  eacc2name[[x[1]]] <- x[4]) # D22117
+
+
+@ 
+modified D22517: lookup tables augmented with Bogdan's data annotations
+<<label=bogdandatannot, echo=FALSE, eval=TRUE>>=
+extractSym <- function(x) {
+    # for use with apply() and bogdan MS data sets
+    # these data sets have missing symbols; symbols occur in description column
+    if (x[3] == '' & grepl('GN', x[2])) {
+        y <- unlist(strsplit(x[2], split=' '))
+        y <- y[grep('GN', y)]
+        z <- unlist(strsplit(y, split='='))
+        x <- c(x[1], sub(' OS=.*', '', x[2]), as.character(z)[2] )
+    } else {
+        x
+    }
+}
+
+bann227 <- x227.df[,c(4, 5, 25)]
+bann238 <- x238.df[,c(3, 4, 21)]
+bann239 <- x239.df[,c(3, 4, 21)]
+bann243 <- x243.df[,c(3, 4, 23)]
+
+bann <- rbind(bann227, bann238, bann239, bann243)
+bann <- bann[bann$Gene.Symbol != '' | grepl('GN', bann$Description),]
+# CON refers to contamination, these proteins are contaminants, we remove them
+bann <- bann[!grepl('CON',bann$Description),]
+bann <- apply(bann, 1, extractSym)
+bann.df <- as.data.frame(t(bann))
+colnames(bann.df) <- c('Accession', 'Description', 'Gene.Symbol')
+ubann.df <- bann.df[!duplicated(bann.df$Accession),]
+ubann.df$Gene.Symbol <- sapply(ubann.df$Gene.Symbol, function(x) as.character(unlist(strsplit(x, split=';')))[1])
+
+eBBacc2sym <- new.env(hash=TRUE)
+apply(ubann.df, 1, function(x)  eBBacc2sym[[x[1]]] <- x[3])
+
+eBBacc2name <- new.env(hash=TRUE)
+apply(ubann.df, 1, function(x)  eBBacc2name[[x[1]]] <- x[2])
+
+eBBsym2acc <- new.env(hash=TRUE)
+apply(ubann.df, 1, function(x)  eBBsym2acc[[x[3]]] <- x[1])
+
+@ 
+
+%% ====== PATHWAYS ======
+<<label=pathways, echo=FALSE, evall=TRUE>>=
+# FGF signaling
+fgf7.df <- read.table(paste(SERVERPROT, 'Pathways/string_fgf7.tsv', sep='/'), header=FALSE, quote='', sep='\t')
+sfgf7 <- unique(as.character(unlist(fgf7.df[,1:2]))) # symbol
+afgf7 <- as.character(unlist(mget(sfgf7, ealias2acc, ifnotfound=unlist(mget(sfgf7, eBBsym2acc, ifnotfound=sfgf7)))))
+afgf7 <- unique(afgf7[!is.na(afgf7)])
+
+# Wnt signaling
+gsk3beta.df <- read.table(paste(SERVERPROT, 'Pathways/string_gsk3b.tsv', sep='/'), header=FALSE, quote='', sep='\t')
+sgsk3beta <- unique(as.character(unlist(gsk3beta.df[,1:2]))) # symbol
+agsk3beta <- as.character(unlist(mget(sgsk3beta, ealias2acc, ifnotfound=unlist(mget(sgsk3beta, eBBsym2acc, ifnotfound=sgsk3beta)))))
+agsk3beta <- unique(agsk3beta[!is.na(agsk3beta)])
+
+# retinoic acid signaling
+rar.df <- read.table(paste(SERVERPROT, 'Pathways/rar.tsv', sep='/'), header=FALSE, quote='', sep='\t')
+srar <- unique(as.character(unlist(rar.df[,1:2]))) # symbol
+arar <- as.character(unlist(mget(srar, ealias2acc, ifnotfound=unlist(mget(srar, eBBsym2acc, ifnotfound=srar)))))
+arar <- unique(arar[!is.na(arar)])
+
+# TGFB signaling
+tgfbeta.df <- read.table(paste(SERVERPROT, 'Pathways/tgfbeta.tsv', sep='/'), header=FALSE, quote='', sep='\t')
+stgfbeta <- unique(as.character(unlist(tgfbeta.df[,1:2]))) # symbol
+atgfbeta <- as.character(unlist(mget(stgfbeta, ealias2acc, ifnotfound=unlist(mget(stgfbeta, eBBsym2acc, ifnotfound=stgfbeta)))))
+atgfbeta <- unique(atgfbeta[!is.na(atgfbeta)])
+
+sbaronmetal <- c('NEUROD1', 'INSM1', 'ISL1', 'NKX2-2', 'PAX6', 'PDX1', 'ETV1', 'MEIS2', 'EGR4', 'MAFA', 'NKX6-1', 'SIX3', 'OLIG1',
+                'MAFB', 'IRX1', 'IRX2', 'ARX', 'POU6F2', 'FEV', 'HHEX', 'POU3F1', 'NEUROG3', 'SIX2', 'ESR1', 'RXRG')
+abaronmetal <- as.character(unlist(mget(sbaronmetal, ealias2acc, ifnotfound=unlist(mget(sbaronmetal, eBBsym2acc, ifnotfound=sbaronmetal)))))
+abaronmetal <- unique(abaronmetal[!is.na(abaronmetal)])
+
+pdx1_gm <- read.table(paste(SERVERPROT, 'Pathways/gm_Pdx1.txt', sep='/'), header=TRUE, quote='', sep='\t')
+pdx1_gm <- pdx1_gm$Symbol
+pdx1_gm <- as.character(unlist(mget(pdx1_gm, ealias2acc, ifnotfound=unlist(mget(pdx1_gm, eBBsym2acc, ifnotfound=pdx1_gm)))))
+
+# added D22217
+# Activing/TGFB signaling
+activin_gm <- read.table(paste(SERVERPROT, 'Pathways/gm_Activin.txt', sep='/'), header=TRUE, quote='', sep='\t')
+activin_gm <- activin_gm$Symbol
+activin_gm <- as.character(unlist(mget(activin_gm, ealias2acc, ifnotfound=unlist(mget(activin_gm, eBBsym2acc, ifnotfound=activin_gm)))))
+# A0A0B5HR54 for ACVRL1
+# A0A0B5HR54 for ACVR1
+# A8K3M4 for BAMBI
+# Q59FL1, P27037 for ACVR2B
+# Q0VDC6 (and others)for FKBP1A
+# A8K8R5 for BMPR2
+# B5BUG9 for BMPR1B
+
+# D22317
+# Shh signaling
+shh.df <- read.table(paste(SERVERPROT, 'Pathways/string_shh.tsv', sep='/'), header=FALSE, quote='', sep='\t')
+sshh <- unique(as.character(unlist(shh.df[,1:2]))) # symbol
+ashh <- as.character(unlist(mget(sshh, ealias2acc, ifnotfound=unlist(mget(sshh, eBBsym2acc, ifnotfound=sshh)))))
+ashh <- unique(ashh[!is.na(ashh)])
+
+# D22717
+# BMP signaling
+bmp1.df <- read.table(paste(SERVERPROT, 'Pathways/string_bmp_1.tsv', sep='/'), header=FALSE, quote='', sep='\t')
+sbmp1 <- unique(as.character(unlist(bmp1.df[,1:2])))
+bmp2.df <- read.table(paste(SERVERPROT, 'Pathways/string_bmp_2.tsv', sep='/'), header=FALSE, quote='', sep='\t')
+sbmp2 <- unique(as.character(unlist(bmp2.df[,1:2])))
+sbmp <- union(sbmp1, sbmp2)
+abmp <- as.character(unlist(mget(sbmp, ealias2acc, ifnotfound=unlist(mget(sbmp, eBBsym2acc, ifnotfound=sbmp)))))
+# P18075 A4D1W7 O15198 Q6I9T1 C8C060 Q0VDC6
+
+
+
+@ 
+%% modified column names on D21217:
+%% MS channels 126, 127, 128, 129, 130, 131 renamed to
+%% S0c, S1c, S2c, S3c, S4c, S5c
+%% NOTICE: phenodata(p227.csv etc) need also to be changed!
+<<label=datamatricesnotnormalized, echo=FALSE, eval=TRUE>>=
+# remove rows without quantification
+# should log10 transform, not done, yet
+r227.df <- rmNoQuant(x227.df)
+dat227.df <- r227.df[,c(4, 60, 61, 64, 65, 68, 69)]
+rownames(dat227.df) <- dat227.df$Accession
+dat227.df <- dat227.df[, -1]
+#colnames(dat227.df) <- paste('S227', seq(126, 131), sep='_')
+colnames(dat227.df) <- paste('S227', paste('S', seq(0,5), 'c', sep=''), sep='_')
+
+r238.df <- rmNoQuant(x238.df)
+dat238.df <- r238.df[,c(3, 32:37)]
+rownames(dat238.df) <- dat238.df$Accession
+dat238.df <- dat238.df[, -1]
+#colnames(dat238.df) <- paste('S238', seq(126, 131), sep='_')
+colnames(dat238.df) <- paste('S238', paste('S', seq(0,5), 'c', sep=''), sep='_')
+
+r239.df <- rmNoQuant(x239.df)
+dat239.df <- r239.df[,c(3, 32:37)]
+rownames(dat239.df) <- dat239.df$Accession
+dat239.df <- dat239.df[, -1]
+#colnames(dat239.df) <- paste('S239', seq(126, 131), sep='_')
+colnames(dat239.df) <- paste('S239', paste('S', seq(0,5), 'c', sep=''), sep='_')
+
+r243.df <- rmNoQuant(x243.df)
+dat243.df <- r243.df[,c(3, 34:39)]
+# remove Accession 'uc', don't know what this is.
+dat243.df <- dat243.df[!dat243.df$Accession == 'uc',]
+rownames(dat243.df) <- dat243.df$Accession
+dat243.df <- dat243.df[, -grep('Accession', colnames(dat243.df), ignore.case=TRUE)]
+#colnames(dat243.df) <- paste('S243', seq(126, 131), sep='_')
+colnames(dat243.df) <- paste('S243', paste('S', seq(0,5), 'c', sep=''), sep='_')
+
+idx227 <- c(60, 61, 64, 65, 68, 69)
+idx238 <- c(32, 33, 34, 35, 36, 37)
+idx239 <- idx238
+idx243 <- c(34, 35, 36, 37, 38, 39)
+idxlst <- list(idx227, idx238, idx239, idx243)
+
+splelist <- list(S227=dat227.df, S238=dat238.df, S239=dat239.df, S243=dat243.df) # MUST be a LIST!
+
+@ 
+%% ====== BEGIN - QUANTILE NORMALIZATION WITH REFERENCE - NOT DONE YET======
+%% added D21717 continued D2211
+%% abundances of 227 are orders of magnitudes higher than from other samples
+% Google query: quantile normalization,
+% In statistics, quantile normalization is a technique for making two distributions identical in statitical terms.
+% To quantile normalize a test distribution to a reference distribution of the same length, sort the test distribution
+% and sort the reference distribution. (not clear!)
+% see: normalize.AffyBatch.normalize2Reference {caret}: https://www.rdocumentation.org/packages/caret/versions/6.0-34
+<<label=scale227, echo=FALSE, eval=FALSE>>=
+## scaling abundances of sample 227 D21717
+# needed to scale 227
+require(preprocessCore)
+partdat.df <- merge(dat238.df, dat239.df, by=0)
+rownames(partdat.df) <- partdat.df$Row.names
+partdat.df <- partdat.df[,-which(colnames(partdat.df) == 'Row.names')]
+partdat.df <- merge(partdat.df, dat243.df, by=0)
+rownames(partdat.df) <- partdat.df$Row.names
+partdat.df <- partdat.df[,-which(colnames(partdat.df) == 'Row.names')]
+partdat.m <- as.matrix(partdat.df)
+
+npartdat.m <- normalize.quantiles(partdat.m)
+mnorm <- mean(npartdat.m[,1])
+
+dat227.m <- apply(dat227.df, 2, function(x) {
+    f <- mean(x)
+    r <- mnorm/f
+    x*r
+})
+dat227.df <- as.data.frame(dat227.m)
+
+@ 
+<<label=tryagain, echo=FALSE, eval=FALSE>>=
+source(paste(SERVER, 'Sandbox/caret/R/normalize2Reference.R', sep='/'))
+x <- normalize2Reference(exprs(set227), exprs(set238))
+#Error in xy.coords(x, y) : 'x' and 'y' lengths differ
+
+@ 
+%% ====== END - QUANTILE NORMALIZATION WITH REFERENCE ======
+
+% modified D21717,
+% this did not work, not same number of rows
+% use reduce
+<<label=boxplotnotnormalizedtransformed, echo=TRUE, eval=FALSE>>=
+# use plot below label=MSnSetcombined
+xrn <- Reduce(intersect, list(rownames(dat227.df), rownames(dat238.df), rownames(dat239.df), rownames(dat243.df))) # very elegant!
+l227.df <- melt(dat227.df[rownames(dat227.df) %in% xrn,]) # melt is from reshape library
+l238.df <- melt(dat238.df[rownames(dat238.df) %in% xrn,])
+l239.df <- melt(dat239.df[rownames(dat239.df) %in% xrn,])
+l243.df <- melt(dat243.df[rownames(dat243.df) %in% xrn,])
+l.df <- rbind(l227.df, l238.df, l239.df, l243.df)
+l.df$value <- log10(l.df$value)
+pdf(paste(SERVERPROT, 'Pdf/boxp_notNormTranfrm_12117.pdf', sep='/'))
+boxplot(value ~ variable, data=l.df, las=2, main='Dist Not Norm Transformed')
+dev.off()
+@ 
+
+<<label=depthproteincoverage, echo=FALSE, eval=FALSE>>=
+# depth of coverage
+# not removing rows without quantitation: 12943 (with 'old' 227 sample: 13298)
+# afterremoving rows/proteins without quantitation: 12204 (with 'old' 227 sample: 12387)
+
+protCvrg <- function(df, indices, rm) {
+    # determine number of proteins in samples
+    # NOTICE: datxxx.df has rows without quantitation already removed, see label=datamatrices
+    # df: x<sample>.df, eg, x238.df
+    # indices: int vector, abundance columns, see idx227, idx238, etc
+    # rm: logical, whether to filter out proteins without quantitation
+    if (rm) {
+        lg <- apply(df[,indices], 1, function(x) all(is.na(x)))
+        return(df[!lg,]$Accession)
+    }
+    return(df$Accession)
+}
+
+
+removeRowsWithoutQuant <- TRUE # no diff between TRUE/FALSE empty rows removed in label=datamatrices
+coveredProts <- NULL
+for (i in 1:length(notprocessedsplelist)) {
+    coveredProts <- c(coveredProts, protCvrg(notprocessedsplelist[[i]], idxlst[[i]], removeRowsWithoutQuant))
+}
+message(paste(removeRowsWithoutQuant, length(unique(coveredProts)), sep=': '))
+
+@ 
+<<label=confprotassigntables, echo=FALSE, eval=FALSE>>=
+# table of confidence numbers
+conftab227 <- table(x227.df[,grep('Protein.FDR.Conf', colnames(x227.df))])
+conftab238 <- table(x238.df[,grep('Protein.FDR.Conf', colnames(x238.df))])
+conftab239 <- table(x239.df[,grep('Protein.FDR.Conf', colnames(x239.df))])
+#conftab243 has combined confidence?
+
+@ 
+
+<<label=vennsamplecoverage, echo=FALSE, eval=FALSE>>=
+require(gplots)
+
+prepVenn <- function(rm) {
+    # rm: boolean, TRUE: remove rows without quantitation
+    acc <- list()
+    if (rm) {
+        lst <- splelist # from global environment
+        for (s in names(lst)) acc[[s]] <- rownames(lst[[s]])
+    } else {
+        lst <- notprocessedsplelist # from global environment
+        for (s in names(lst)) acc[[s]] <- lst[[s]]$Accession
+    }
+    
+    return(acc)
+}
+
+pdf(paste(SERVER, 'Pres/Slides_27JAN17/vennProteinCoverage.pdf', sep='/'))
+venn(prepVenn(TRUE))
+dev.off()
+
+@ 
+
+<<label=housekeeping, echo=FALSE, eval=FALSE>>=
+#require(GGally) # ggparcoord
+#p <- ggparcoord(data=hk227.df, columns=1:6, scale='uniminmax')
+require(reshape)
+require(ggplot2)
+# from Eisenberg, E. et al. 2013. Trends in Genetics 29, 569.
+#Q9BWL3 C1orf43
+#O43633 CHMP2A charged multivesicular body protein 2a
+#Q9NPA0 EMC7 ER membrane protein complex subunit 7
+#P06744 GPI Glucose-6-phosphate isomerase
+#P49721 PSMB2 Proteasome subunit beta type-2
+#P28070 PSMB4 Proteasome subunit beta type-4
+#P51149 
+#Q00765 REEP5 Receptor expression-enhancing protein 5
+#P62318 SNRPD3 Small nuclear ribonucleoprotein Sm D3
+#P55072 VCP Transitional endoplasmic reticulum ATPase
+#Q9UBQ0 VPS29 Vacuolar protein sorting-associated protein 29
+hk <- c('Q9BWL3', 'O43633', 'Q9NPA0', 'P06744', 'P49721', 'P28070', 'P51149', 'Q00765', 'P62318', 'P55072', 'Q9UBQ0')
+
+hk227.df <- dat227.df[rownames(dat227.df) %in% hk,]
+hk238.df <- dat238.df[rownames(dat238.df) %in% hk,]
+hk239.df <- dat239.df[rownames(dat239.df) %in% hk,]
+hk243.df <- dat243.df[rownames(dat243.df) %in% hk,]
+
+gplot_hkprots<- function(hdf, df) {
+    # hdf: data.frame of housekeeping proteins
+    # df: data.frame sample data
+    xhdf <- namerows(hdf, col.name='Housekeeping')
+    xhdf <- melt(xhdf, id.var = 'Housekeeping')
+    colnames(xhdf) <- c('Housekeeping', 'Samples', 'Abundance')
+
+    xmin <- min(df, na.rm=TRUE)
+    xmax <- max(df, na.rm=TRUE)
+    s <- deparse(substitute(hdf))
+    sl <- unlist(strsplit(s, '\\.'))[1]
+    sl <- unlist(strsplit(sl, 'k'))[2]
+
+    pg <- ggplot(xhdf, aes(Samples, Abundance, group=Housekeeping, color=Housekeeping)) + geom_line()
+    pg <- pg + theme(axis.text.x = element_text(angle = 90, hjust = 1), plot.title=element_text(color='blue', hjust=0.5))
+    pg <- pg + scale_y_continuous(limits = c(xmin, xmax ))
+    pg <- pg + ggtitle(paste('Houskeeping', 'Proteins', paste('S', sl, sep=''), sep=' '))
+    print(pg)
+}
+ 
+pdf(paste(SERVER, 'Pres/Slides_27JAN17/parallelpHousekeeping227.pdf', sep='/'))
+gplot_hkprots(log10(hk227.df), log10(dat227.df))
+dev.off()
+pdf(paste(SERVER, 'Pres/Slides_27JAN17/parallelpHousekeeping238.pdf', sep='/'))
+gplot_hkprots(log10(hk238.df), log10(dat238.df))
+dev.off()
+pdf(paste(SERVER, 'Pres/Slides_27JAN17/parallelpHousekeeping239.pdf', sep='/'))
+gplot_hkprots(log10(hk239.df), log10(dat239.df))
+dev.off()
+pdf(paste(SERVER, 'Pres/Slides_27JAN17/parallelpHousekeeping243.pdf', sep='/'))
+gplot_hkprots(log10(hk243.df), log10(dat243.df))
+dev.off()
+
+@ 
+
+%%========== MSnSet OBJECTS INDIVIDUAL SAMPLES=======
+
+<<label=MSnSet, echo=FALSE, eval=FALSE>>=
+# can probably done more efficiently
+prepareSet <- function(df, idx1, idx2, spl) {
+    # spl: sample name, e.g., '238'
+    # idx1: indices of abundance columns in read file
+    # idx2: indices used to generate feature file
+    # there is an accession duplication in 243 probably due to an error in the search software
+    df <- df[!duplicated(df$Accession),]
+
+    xdf <- df[, idx1]
+    assign('d', get('xdf'))
+    s <- paste('S', spl, sep='')
+    colnames(d) <- c('Accession', paste(s, seq(126, 131), sep='_'))
+    dfile <- paste(paste(SERVERPROT, 'TempData/d', sep='/'), spl, '.csv', sep='/',sep='')
+    write.table(d, file=dfile, quote=FALSE, sep=',', col.names=TRUE, row.names=FALSE)
+     
+    f <- df[, idx2]
+    ffile <- paste(paste(SERVERPROT, 'TempData/f', sep='/'), spl, '.csv', sep='/',sep='')
+    write.table(f, file=ffile, quote=FALSE, sep=',', col.names=TRUE, row.names=FALSE)
+    
+    p <- data.frame(sampleNames=colnames(d[, -1]), run=rep('1', 6))
+    pfile <- paste(paste(SERVERPROT, 'TempData/p', sep='/'), spl, '.csv', sep='/',sep='')
+    write.table(p, file=pfile, quote=FALSE, sep=',', col.names=TRUE, row.names=FALSE)
+}
+
+# idx1: abundance columns
+dx227 <- c(4, 60, 61, 64, 65, 68, 69)
+dx238 <- c(3, 32, 33, 34, 35, 36, 37)
+dx239 <- c(3, 32, 33, 34, 35, 36, 37)
+dx243 <- c(3, 34, 35, 36, 37, 38, 39)
+
+# idx2: feature columns
+fx227 <- c(4, 4, 10, 17)
+fx238 <- c(3, 3, 8, 51)
+fx239 <- fx238
+fx243 <- fx238
+
+prepareSet(rmNoQuant(x227.df), dx227, fx227, '227')
+prepareSet(rmNoQuant(x238.df), dx238, fx238, '238')
+prepareSet(rmNoQuant(x239.df), dx239, fx239, '239')
+prepareSet(rmNoQuant(x243.df), dx243, fx243, '243')
+ 
+set227 <- readMSnSet(exprsFile=paste(SERVERPROT, 'TempData/d227.csv', sep='/'), featureDataFile=paste(SERVERPROT, 'TempData/f227.csv', sep='/'),
+                     phenoDataFile=paste(SERVERPROT, 'TempData/p227.csv', sep='/'), sep=',')
+set238 <- readMSnSet(exprsFile=paste(SERVERPROT, 'TempData/d238.csv', sep='/'), featureDataFile=paste(SERVERPROT, 'TempData/f238.csv', sep='/'),
+                     phenoDataFile=paste(SERVERPROT, 'TempData/p238.csv', sep='/'), sep=',')
+set239 <- readMSnSet(exprsFile=paste(SERVERPROT, 'TempData/d239.csv', sep='/'), featureDataFile=paste(SERVERPROT, 'TempData/f239.csv', sep='/'),
+                     phenoDataFile=paste(SERVERPROT, 'TempData/p239.csv', sep='/'), sep=',')
+set243 <- readMSnSet(exprsFile=paste(SERVERPROT, 'TempData/d243.csv', sep='/'), featureDataFile=paste(SERVERPROT, 'TempData/f243.csv', sep='/'),
+                     phenoDataFile=paste(SERVERPROT, 'TempData/p243.csv', sep='/'), sep=',')
+
+@ 
+<<label=missing, echo=FALSE, eval=FALSE>>=
+miss227 <- table(is.na(set227))
+miss238 <- table(is.na(set238))
+miss239 <- table(is.na(set239))
+miss243 <- table(is.na(set243))
+
+@ 
+%% DOES NOT WORK, sample names have to match
+<<label=plotaverages, echo=FALSE, eval=FALSE>>=
+msnl <- MSnSetList(list(set227, set238, set239, set243))
+avgsets <- averageMSnSet(msnl)
+
+@ 
+
+%% check  normalization methods
+<<label=plotindividualnormalized, echo=FALSE, eval=FALSE>>=
+res <- set238
+
+## impute missing
+ires <- impute(res, 'MLE')
+exprs(ires) <- log(exprs(ires))
+
+## normalize
+ires.max <- normalise(ires, "max")
+ires.sum <- normalise(ires, "sum")
+ires.quant <- normalise(ires, "quantiles")
+ires.qrob <- normalise(ires, "quantiles.robust")
+ires.vsn <- normalise(ires, "vsn")
+
+## plot
+par.old <- par(mfrow=c(2,3),mar=c(2.9,2.9,2.9,1))
+.plot(ires, ttl = "Non-normalised data")
+.plot(ires.max, ttl = "Maximum")
+.plot(ires.sum, ttl = "Sum")
+.plot(ires.quant, ttl = "Quantile")
+.plot(ires.qrob, ttl = "Robust quantile")
+.plot(ires.vsn, ttl = "vsn")
+par(par.old)
+
+@ 
+<<label=imputenormalizeseparate, echo=FALSE, eval=FALSE>>=
+require(norm)
+# making normalized data objects for later use
+set227 <- imputeNormalizeTransform(set227)
+#print(.plot(set227, 'Sample 227'))
+set238 <- imputeNormalizeTransform(set238)
+#print(.plot(set238, 'Sample 238'))
+set239 <- imputeNormalizeTransform(set239)
+#print(.plot(set239, 'Sample 239'))
+set243 <- imputeNormalizeTransform(set243)
+#print(.plot(set243, 'Sample 243'))
+
+ndat227.df <- as.data.frame(exprs(set227))
+ndat238.df <- as.data.frame(exprs(set238))
+ndat239.df <- as.data.frame(exprs(set239))
+ndat243.df <- as.data.frame(exprs(set243))
+
+@ 
+%%====== MSnSet OBJECT ALL SAMPLES ======
+%%====== INTERSECTION OF ALL SAMPLES ======
+<<label=MSnSetcombined, echo=FALSE, eval=TRUE>>=
+require(reshape)
+# datxxx.df has empty rows (no quantitation) removed
+# datxxx.df must be the same as in label=datamatricesnotnormalized!!!
+adat227.df <- namerows(dat227.df, col.name='features') # 9858
+adat238.df <- namerows(dat238.df, col.name='features') # 9055
+adat239.df <- namerows(dat239.df, col.name='features') # 8732
+adat243.df <- namerows(dat243.df, col.name='features') # 9895
+# total proteins: 37540
+# total unique proteins: 12203
+# total common in all samples: 6785
+
+# to calculate overlaps with python (added:2/1/2017)
+write.table(adat227.df$features, paste(SERVERPROT, 'Python/f227', sep='/'), sep='\t', quote=FALSE, col.names=FALSE, row.names=FALSE)
+write.table(adat238.df$features, paste(SERVERPROT, 'Python/f238', sep='/'), sep='\t', quote=FALSE, col.names=FALSE, row.names=FALSE)
+write.table(adat239.df$features, paste(SERVERPROT, 'Python/f239', sep='/'), sep='\t', quote=FALSE, col.names=FALSE, row.names=FALSE)
+write.table(adat243.df$features, paste(SERVERPROT, 'Python/f243', sep='/'), sep='\t', quote=FALSE, col.names=FALSE, row.names=FALSE)
+
+# matrix
+dat.df <- merge(adat227.df, adat238.df)
+dat.df <- merge(dat.df, adat239.df)
+dat.df <- merge(dat.df, adat243.df)
+rownames(dat.df) <- dat.df$features
+dat.df <- dat.df[,-1]
+dat.df <- dat.df[order(rownames(dat.df)), ]
+dat.m <- as.matrix(dat.df)
+
+# phenodata
+p.df <- read.csv(paste(SERVERPROT, 'TempData/pData.txt', sep='/'))
+
+# features, need only one sample
+f.df <- x238.df[x238.df$Accession %in% rownames(dat.df),c(3,21)]
+f.df <- f.df[order(f.df$Accession),]
+rownames(f.df) <-  f.df$Accession
+f.df <- f.df[, -1, drop=FALSE]
+
+# !IMPORTANT rownames and feature names have to be in the same order
+mss <- MSnSet(dat.m, f.df, p.df) # !! 6785 proteins NOT 7528
+xmss <- mss
+exprs(xmss) <- log10(exprs(xmss))
+
+if (FALSE) {
+    pdf(paste(SERVER, 'Pres/Slides_27JAN17/boxpNotNormalized.pdf', sep='/'))
+    print(.plot(xmss, 'All Samples Log Transformed  Not Normalized'))
+    dev.off()
+
+    mss <- imputeNormalizeTransform(mss)
+
+    pdf(paste(SERVER, 'Pres/Slides_27JAN17/boxpNormalized.pdf', sep='/'))
+    print(.plot(mss, 'All Samples Normalized Log Transformed'))
+    dev.off()
+} else {
+        mss <- imputeNormalizeTransform(mss) # D21317
+        # added D22217
+        savemssobject <- FALSE 
+        if (savemssobject) {
+            sfile <- paste('TempWGCN', 'exprmat', sep='/')
+            save(ems.m, file=sfile)
+        }
+}
+
+@ 
+
+<<label=ExpressionSetcombined, echo=FALSE, eval=TRUE>>=
+pd <- read.table(paste(SERVERPROT, 'TempData/pData.txt', sep='/'), sep=',')
+phenoData <- new('AnnotatedDataFrame', data=pd)
+mses <- ExpressionSet(assayData=exprs(mss), phenoData=phenoData)
+
+@ 
+%%====== UNION OF ALL SAMPLES ======
+% D032117
+<<label=MSnSetandExpSetfromunion, echo=FALSE, eval=TRUE>>=
+# abundance matrix (using all=TRUE)
+newdat.df <- merge(adat227.df, adat238.df, all=TRUE)
+newdat.df <- merge(newdat.df, adat239.df, all=TRUE)
+newdat.df <- merge(newdat.df, adat243.df, all=TRUE)
+
+rownames(newdat.df) <- newdat.df$features
+newdat.df <- newdat.df[,-1]
+newdat.df <- newdat.df[order(rownames(newdat.df)), ]
+newdat.m <- as.matrix(newdat.df)
+
+# phenodata (same)
+p.df <- read.csv(paste(SERVERPROT, 'TempData/pData.txt', sep='/'))
+
+# features
+newff <- rownames(newdat.df)
+names(newff) <- as.character(unlist(mget(newff, ealias2acc, ifnotfound=unlist(mget(newff, eBBsym2acc, ifnotfound=newff)))))
+newf.df <- as.data.frame(newff)
+colnames(newf.df) <- 'Gene.Symbol'
+
+# new MSnSet object
+newmss <- MSnSet(newdat.m, newf.df, p.df) # 12203
+
+# filter, log transform, but NO IMPUTATATION (do unbalanced limma instead)
+newmss <- filterNA(newmss, pNA=0.7) # 10031
+newmss <- log(newmss, base=10) 
+newmss <- normalize(newmss, method='quantiles')
+
+# ExpressionSet
+pd <- read.table(paste(SERVERPROT, 'TempData/pData.txt', sep='/'), sep=',')
+phenoData <- new('AnnotatedDataFrame', data=pd)
+newmses <- ExpressionSet(assayData=exprs(newmss), phenoData=phenoData)
+
+@ 
+%%====== MSnSet OBJECTS ALL SUBSETS OF SAMPLES ======
+<<label=msnsetfromsubsetsD2517, echo=FALSE, eval=TRUE>>=
+require(zoo) # rollapply
+
+## moved to ds_functions_21JAN17.Rnw
+#getSampleName <- function(df) {
+#    cnames <- as.character(colnames(df))
+#    xl <- strsplit(cnames, split='_')
+#    xl <- lapply(xl, function(x) x[1])
+#    x <- sub('S', '', unlist(xl))
+#    spls <- unique(x)
+#    return(spls)
+#}
+
+aspls <- c('a227', 'a238', 'a239', 'a243')
+
+# these are needed, see label=MSnSetcombined
+adat.lst <- list(a227=adat227.df, a238=adat238.df, a239=adat239.df, a243=adat243.df)
+ddat.lst <- list(d227=dat227.df, d238=dat238.df, d239=dat239.df, d243=dat243.df) # same list different name, see: goto 96
+
+# this functions generates the abundances matrices of all subsets of the samples
+makeSubsetExprMatrix <- function(ncomb, alist) {
+    ## make MSnSet objects of subsets of samples
+    ## use adat227, adat238 etc, see label=MSnSetcombined
+    ## returns a list
+    ## parameters:
+    # ncomb: number of samples in subsets, LESS THAN NUMBER OF SAMPLES
+    # alist: list of df of spls, adat.lst
+    xm <- combn(length(alist), ncomb) # matrix, each column is a combination
+    if (ncomb >= length(alist)) stop('Number of list elements chosen too big!')
+    
+    if (ncomb > 1) {
+        datl <- apply(xm, 2, function(x, alist) {
+            mr <-  NULL
+            if (length(x) > 1) {
+                mr <- merge(alist[[x[1]]], alist[[x[2]]])
+                for (i in x[-c(1,2)]) {
+                    mr <- merge(mr, alist[[i]])
+                }
+            }
+            rownames(mr) <- mr$features
+            mr <- mr[,-1]
+            rm <- mr[order(rownames(mr)),]
+            #return(as.matrix(mr))
+            return(mr) # return a data.frame, make matrix later
+        }, alist)
+        return(datl) #datl <- c(datl, ddat.lst)
+    }
+    if (ncomb == 1) {
+        adatl <- lapply(alist, function(x) {
+            rownames(x) <- x$features
+            x <- x[,-grep('features', colnames(x))]
+            x <- x[order(rownames(x)),]
+            #return(x)
+        })
+        return(adatl)
+    }
+}
+
+makeSubsetPheno <-  function(pdat, lst) {
+    ## generates pheno data data frame for all sample combinations in a list given as parameter
+    ## returns a list
+    # pdat: phenodata for all samples: p.df from label=MSnSetcombined
+    # lst: a list of data frames of sample combinations, output from makeSubsetExprMatrix()
+    makePheno <- function(df, pd) {
+        ## generates pheno data data.frame for a combination of samples
+        # pd: phenodata for all samples: p.df from label=MSnSetcombined
+        # df: a sample combination data.frame
+        spln <- getSampleName(df)
+        idx <- grep(paste(spln, collapse='|'), rownames(pd))
+        return(pd[idx,,drop=FALSE])
+    }
+    pl <- lapply(lst, makePheno, pdat)
+}
+
+makeSubsetFeatures <- function(lst) {
+    ## generates the pheno data df for all combinations of samples
+    ## returns a list
+    # lst: list of abundance expression data frames, output from makeMSnSetfromSubsets
+    fl <- lapply(lst, function(df) {
+        spln <- getSampleName(df)[1] # just one
+        x.df <- get(paste('x', spln, '.df', sep=''))
+        f.df <- x.df[x.df$Accession %in% rownames(df),c('Accession','Gene.Symbol')]
+        f.df <- f.df[order(f.df$Accession),]
+        rownames(f.df) <-  f.df$Accession
+        f.df <- f.df[, -1, drop=FALSE]
+    })
+}
+
+makeMSnSetfromSampleSubsets <- function(lst, pdat) {
+    ## makes MSnSet objects outputs of makeSubsetExprMatrix(), makeSubPheno(), and makeSubsetFeatures()
+    ## returns a list of MSnSet objects for sample combinations in lst
+    # parameters:
+    # lst: output from makeSubsetExprMatrix(); contains information how many samples were used
+    plst <- makeSubsetPheno(pdat, lst)
+    flst <- makeSubsetFeatures(lst)
+    
+    reslst <-  NULL
+    nmes <- NULL
+    for (i in seq(length(lst))) {
+        spln <- getSampleName(lst[[i]])
+        spln <- paste('s', paste(spln, collapse=''), sep='') # format fixed 'sxxxyyyzzz', xyz integers only on needs to be present
+        nmes <- c(nmes, spln)
+        xm <- lst[[i]]
+        pd <- plst[[i]]
+        fd <- flst[[i]]
+        #stop('Stop here')
+        #reslst[[spln]] <- MSnSet(as.matrix(lst[[i]]), flst[[i]], plst[[i]])
+        x <- MSnSet(as.matrix(lst[[i]]), flst[[i]], plst[[i]])
+        x <- imputeNormalizeTransform(x)
+        reslst <- c(reslst, x)
+    }
+    names(reslst) <- nmes
+    
+    return(reslst)
+}
+
+if (FALSE) {
+    xlst <-  makeSubsetExprMatrix(1, adat.lst) 
+    msslst <- makeMSnSetfromSampleSubsets(xlst, p.df)
+}
+
+@ 
+
+%%====== MSnSet OBJECTS ALL 4 SUBSETS OF 3 SAMPLES (old) ======
+% by using all combinations of 4 samples we are adding 1736 proteins to 6785 analyzed!
+<<label=MSnSetS27.38.39, echo=FALSE, eval=FALSE>>=
+# matrix
+dat.df <- merge(adat227.df, adat238.df)
+dat.df <- merge(dat.df, adat239.df)
+rownames(dat.df) <- dat.df$features
+dat.df <- dat.df[,-1]
+dat.df <- dat.df[order(rownames(dat.df)), ]
+dat273839.m <- as.matrix(dat.df) # 7069 proteins
+
+# phenodata
+p273839.df <- read.csv(paste(SERVERPROT, 'TempData/pData273839.csv', sep='/'))
+
+# features
+f.df <- x227.df[x227.df$Accession %in% rownames(dat.df),c(4,25)]
+f.df <- f.df[order(f.df$Accession),]
+rownames(f.df) <-  f.df$Accession
+f273839.df <- f.df[, -1, drop=FALSE]
+
+# MSnSet
+mss273839 <- MSnSet(dat273839.m, f273839.df, p273839.df)
+mss273839 <- imputeNormalizeTransform(mss273839)
+
+#print(.plot(mss273839, 'Samples 27 38 39 Normalized Log Transformed'))
+
+# ExpressionSet
+pd <- read.csv(paste(SERVERPROT, 'TempData/pData273839.csv', sep='/'))
+phenoData <- new('AnnotatedDataFrame', data=pd)
+mses273839 <- ExpressionSet(assayData=exprs(mss273839), phenoData=phenoData)
+
+@ 
+<<label=MSnSetS27.38.43, echo=FALSE, eval=FALSE>>=
+# matrix
+dat.df <- merge(adat227.df, adat238.df)
+dat.df <- merge(dat.df, adat243.df)
+rownames(dat.df) <- dat.df$features
+dat.df <- dat.df[,-1]
+dat.df <- dat.df[order(rownames(dat.df)), ]
+dat273843.m <- as.matrix(dat.df) # 7465 proteins
+
+# phenodata
+p273843.df <- read.csv(paste(SERVERPROT, 'TempData/pData273843.csv', sep='/'))
+
+# features
+f.df <- x227.df[x227.df$Accession %in% rownames(dat.df),c(4,25)]
+f.df <- f.df[order(f.df$Accession),]
+rownames(f.df) <-  f.df$Accession
+f273843.df <- f.df[, -1, drop=FALSE]
+
+# MSnSet
+mss273843 <- MSnSet(dat273843.m, f273843.df, p273843.df)
+mss273843 <- imputeNormalizeTransform(mss273843)
+
+#print(.plot(mss273843, 'Samples 27 38 43 Normalized Log Transformed'))
+
+# ExpressionSet
+pd <- read.csv(paste(SERVERPROT, 'TempData/pData273843.csv', sep='/'))
+phenoData <- new('AnnotatedDataFrame', data=pd)
+mses273843 <- ExpressionSet(assayData=exprs(mss273843), phenoData=phenoData)
+
+@ 
+<<label=MSnSetS27.39.43, echo=FALSE, eval=FALSE>>=
+# matrix
+dat.df <- merge(adat227.df, adat239.df)
+dat.df <- merge(dat.df, adat243.df)
+rownames(dat.df) <- dat.df$features
+dat.df <- dat.df[,-1]
+dat.df <- dat.df[order(rownames(dat.df)), ]
+dat273943.m <- as.matrix(dat.df) # 7279 proteins
+
+# phenodata
+p273943.df <- read.csv(paste(SERVERPROT, 'TempData/pData273943.csv', sep='/'))
+
+# features
+f.df <- x227.df[x227.df$Accession %in% rownames(dat.df),c(4,25)]
+f.df <- f.df[order(f.df$Accession),]
+rownames(f.df) <-  f.df$Accession
+f273943.df <- f.df[, -1, drop=FALSE]
+
+# MSnSet
+mss273943 <- MSnSet(dat273943.m, f273943.df, p273943.df)
+mss273943 <- imputeNormalizeTransform(mss273943)
+
+#print(.plot(mss273943, 'Samples 27 39 43 Normalized Log Transformed'))
+
+# ExpressionSet
+pd <- read.csv(paste(SERVERPROT, 'TempData/pData273943.csv', sep='/'))
+phenoData <- new('AnnotatedDataFrame', data=pd)
+mses273943 <- ExpressionSet(assayData=exprs(mss273943), phenoData=phenoData)
+
+
+@ 
+<<label=MSnSetS38.39.43, echo=FALSE, eval=FALSE>>=
+# matrix
+dat.df <- merge(adat238.df, adat239.df)
+dat.df <- merge(dat.df, adat243.df)
+rownames(dat.df) <- dat.df$features
+dat.df <- dat.df[,-1]
+dat.df <- dat.df[order(rownames(dat.df)), ]
+dat383943.m <- as.matrix(dat.df) # 7063 proteins
+
+# phenodata
+p383943.df <- read.csv(paste(SERVERPROT, 'TempData/pData383943.csv', sep='/'))
+
+# features
+f.df <- x238.df[x238.df$Accession %in% rownames(dat.df),c(3,21)]
+f.df <- f.df[order(f.df$Accession),]
+rownames(f.df) <-  f.df$Accession
+f383943.df <- f.df[, -1, drop=FALSE]
+
+# MSnSet
+mss383943 <- MSnSet(dat383943.m, f383943.df, p383943.df)
+mss383943 <- imputeNormalizeTransform(mss383943)
+
+#print(.plot(mss383943, 'Samples 38 39 43 Normalized Log Transformed'))
+
+# ExpressionSet
+pd <- read.csv(paste(SERVERPROT, 'TempData/pData383943.csv', sep='/'))
+phenoData <- new('AnnotatedDataFrame', data=pd)
+mses383943 <- ExpressionSet(assayData=exprs(mss383943), phenoData=phenoData)
+
+@ 
+
+\end{document}

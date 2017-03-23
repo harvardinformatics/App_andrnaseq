@@ -1,0 +1,210 @@
+\documentclass[a4paper]{article}
+\usepackage{Sweave}
+\begin{document}
+
+\title{}
+\author{}
+
+\maketitle
+
+<<label=libraries, echo=FALSE, eval=TRUE>>=
+library(edgeR)
+
+quartz.options(width=5, height=5)
+options(editor="/usr/bin/vim")
+options(stringsAsFactors=FALSE)
+
+USEPATH <- '~/Dropbox/Harvard/MeltonRNAseq'
+USEPROTPATH <- '~/Dropbox/Harvard/MeltonProteomics'
+UP1PATH <- '~/Dropbox/Harvard'
+
+SERVER <- '/srv/shiny-server/DimaApp'
+SERVERPROT <- '/srv/shiny-server/DimaApp/MeltonProteomics'
+SERVERRNA <- '/srv/shiny-server/DimaApp/MeltonRNAseq'
+#SERVERPROT <- SERVER
+#SERVERRNA <- SERVER
+
+#Sweave(paste(SERVERRNA, '/ds_rnaseqFunctions_13MAR17.Rnw', sep='/'))
+
+@ 
+%%%%%% ALL SAMPLES, 1st RUN %%%%%%
+% D030717
+<<lable=loadrnaseq, echo=FALSE, eval=TRUE>>=
+files <- list.files(paste(SERVERRNA, 'RSEM1st', sep='/'), pattern='genes.results', full.names=TRUE)
+dat.dge <- readDGE(files, columns=c(1,5))
+
+@ 
+
+<<label=samples, echo=FALSE, eval=TRUE>>=
+require(stringr)
+samplenames <- c(paste('S227_S', seq(5), 'c', sep=''),
+                 paste('S229_S', seq(5), 'c', sep=''),
+                 paste('S230_S', seq(0, 1), 'c', sep=''), paste('S230_S', seq(3, 5), 'c', sep=''),
+                 paste('S237_S', seq(0, 5), 'c', sep=''),
+                 paste('S238_S', seq(0, 5), 'c', sep=''),
+                 paste('S239_S', seq(0, 5), 'c', sep=''),
+                 paste('S243_S', seq(0, 4), 'c', sep=''))
+
+# samples
+colnames(dat.dge) <- samplenames
+group <- as.factor(c(rep(c('S1c', 'S2c', 'S3c', 'S4c', 'S5c'), 2),
+                   c('S0c', 'S1c', 'S3c', 'S4c', 'S5c'),
+                   c('S0c', 'S1c', 'S2c', 'S3c', 'S4c', 'S5c'),
+                   c('S0c', 'S1c', 'S2c', 'S3c', 'S4c', 'S5c'),
+                   c('S0c', 'S1c', 'S2c', 'S3c', 'S4c', 'S5c'),
+                   c('S0c', 'S1c', 'S2c', 'S3c', 'S4c')))
+                   
+dat.dge$samples$group <- group
+                   
+# genes
+gns <- sapply(rownames(dat.dge), function(x) {
+    a <- unlist(strsplit(x, split='_'))
+    if (length(a) > 2) {
+        a <- unlist(str_split(x, '_', n=2))
+    }
+    return(a)
+})
+
+gns.df <- as.data.frame(t(as.data.frame(gns, row.names=NULL)))
+gns.df <- data.frame(Ens_sym=rownames(gns.df), gns.df)
+rownames(gns.df) <- NULL
+colnames(gns.df) <- c('Ens_sym', 'EnsID', 'Symbol')
+up.acc <- as.character(unlist(mget(gns.df$Symbol, ealias2acc, ifnotfound=unlist(mget(gns.df$Symbol, eBBsym2acc, ifnotfound=NA)))))
+gns.df <- data.frame(gns.df, Acc=up.acc)
+
+# RAW DATA SET
+dat.dge$genes <- gns.df
+
+# make plots colorful
+require(RColorBrewer)
+cbcol <- group
+levels(cbcol) <- brewer.pal(nlevels(cbcol), 'Set2')
+cbcol <- as.character(cbcol)
+
+@
+<<label=densityplots, echo=FALSE, eval=FALSE>>=
+# without cleaning
+pdf(paste(SERVER, 'Pres/Plots_dima10MAR17/densityBeforeCleaning.pdf', sep='/'))
+lx.cpm <- cpm(dat.dge, log=TRUE)
+plot(density(lx.cpm[,1]), ylim=c(0, 0.7), main='Count Distribution with Low Counts')
+for (i in 2:ncol(dat.dge)) {
+    den <- density(lx.cpm[,i])
+    lines(den$x, den$y)
+}
+dev.off()
+
+
+# with cleaning
+pdf(paste(SERVER, 'Pres/Plots_dima10MAR17/densityAfterCleaning.pdf', sep='/'))
+xxcl.dge <- cleanAndNormalize(dat.dge, clean=TRUE, norm=FALSE) # dim(xxcl.dge) 18013 38
+lxcl.cpm <- cpm(xxcl.dge, log=TRUE)
+plot(density(lxcl.cpm[,1]), ylim=c(0, 0.2), main='Count Distribution without Low Counts')
+for (i in 2:ncol(xxcl.dge)) {
+    den <- density(lxcl.cpm[,i])
+    lines(den$x, den$y)
+}
+dev.off()
+
+@ 
+<<label=normalizeandboxplot, echo=FALSE, eval=FALSE>>=
+nrmcl.dge <- cleanAndNormalize(dat.dge, clean=TRUE, norm=TRUE)
+lcn.cpm <- cpm(nrmcl.dge, log=TRUE)
+
+pdf(paste(SERVER, 'Pres/Plots_dima10MAR17/boxplotNormalized.pdf', sep='/'))
+boxplot(lcn.cpm, las=2, col=cbcol, cex.axis=0.5, outcex=0.8, outpch=20, main='Normalized Boxplots')
+dev.off()
+
+@ 
+<<label=mds, echo=FALSE, eval=FALSE>>=
+pdf(paste(SERVER, 'Pres/Plots_dima10MAR17/mdsplot.pdf', sep='/'))
+plotMDS(dat.dge, top=Inf, labels=group, col=cbcol,  xlab='dim1', ylab='dim2', cex=0.9, main='Multidimensional Scaling Plot')
+dev.off()
+
+@ 
+% Using edgeR, limma, and voom
+<<label=linearmodeldesign, echo=FALSE, eval=TRUE>>=
+design <- model.matrix(~0 + group)
+colnames(design) <- c('S0c', 'S1c', 'S2c', 'S3c', 'S4c', 'S5c')
+
+contr.matrix <- makeContrasts(S01=S1c - S0c, S12=S2c - S1c, S23=S3c - S2c, S34=S4c - S3c, S45=S5c - S4c,
+                              levels=colnames(design)) 
+
+@ 
+<<label=voomall, echo=FALSE, eval=TRUE>>=
+v <- voom(dat.dge, design, plot=FALSE) # should be raw counts, see documentation of voom D031417
+vfit <- lmFit(v, design)
+cvfit <- contrasts.fit(vfit, contrasts=contr.matrix)
+efit <- eBayes(cvfit)
+
+@ 
+% D031417: venn in separate code snippet
+<<label=vennplot, echo=FALSE, eval=FALSE>>=
+dt <- decideTests(vfit)
+vennDiagram(dt)
+
+@ 
+% NOTICE: this needs amending, use voom with raw counts!!
+<<label=voomprotms, echo=FALSE, eval=FALSE>>=
+# only for genes whose proteins are in mss
+ismsprot <- nrmcl.dge$genes$Acc %in% rownames(exprs(mss))
+#restricting the DGEList object to genes for proteins in mss
+xms.dge <- nrmcl.dge[ismsprot,, keep.lib.sizes=FALSE]
+
+v <- voom(xms.dge, design, plot=FALSE)
+
+vfit <- lmFit(v, design)
+cvfit <- contrasts.fit(vfit, contrasts=contr.matrix)
+efit <- eBayes(cvfit)
+
+dt <- decideTests(efit)
+
+pdf(paste(SERVER, 'Pres/Plots_dima10MAR17/vennGenesInMS.pdf', sep='/'))
+vennDiagram(dt, main='Venn Diagram for Genes Transl into MS Prots')
+dev.off()
+
+@ 
+<<label=heatmapall, echo=FALSE, eval=FALSE>>=
+#Sweave(paste(SERVERPROT, 'ds_analysis_A_2FEB17.Rnw', sep='/')) # useLevelplot_v2() and exprs()
+restrDge <- function(dgeobj, restrto) {
+    ##restrict DGEList object to genes with proteins in mss    
+    ismsprot <- dgeobj$genes$Acc %in% restrto
+    return(dgeobj[ismsprot,, keep.lib.sizes=FALSE])
+}
+
+# only use MS proteins
+vfit <- vfit[vfit$genes$Acc %in% rownames(exprs(mss)),]
+vf.m <- vfit$coef
+vf.df <- as.data.frame(vf.m)
+
+svf.df <- scale(vf.df)
+tsvf.df <- t(svf.df)
+
+row.hc <- hclust(stats::dist(tsvf.df))
+col.hc <- hclust(stats::dist(svf.df))
+
+dd.col <- as.dendrogram(col.hc)
+#pdf(paste(SERVER, 'Pres/Plots_dima10MAR17/heatmapGenesInMS.pdf', sep='/'))
+useLevelplot_v2(tsvf.df, dd.col)
+#dev.off()
+
+@ 
+% D031217
+<<label=DEanalwithDEseq2, echo=FALSE, eval=FALSE>>=
+@ 
+% D031017
+<<label=barplot, echo=FALSE, eval=FALSE>>=
+
+proteins <- c('D2IYK3', 'J7H3Y9', 'Q9H6I2', 'P52945', 'P78426', 'P01308', 'P01275')
+rdf.lst <- genSubsetAbundMat_RNAseq(dimaprots, dat.dge, TRUE)
+
+
+p <- multiBarPlot_RNAseq(df.lst, rdf.lst)
+do.call(grid.arrange, c(p[4:5], ncol=1))
+
+
+
+
+
+@ 
+
+\end{document}

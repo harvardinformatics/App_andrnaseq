@@ -1,0 +1,827 @@
+\documentclass[a4paper]{article}
+\usepackage{Sweave}
+\begin{document}
+
+\title{}
+\author{}
+
+\maketitle
+
+<<label=libraries, echo=FALSE, eval=TRUE>>=
+library(plyr)
+library(ggplot2)
+library(lattice)
+library(gridExtra)
+library(limma)
+
+quartz.options(width=5.5, height=5.5)
+options(editor="/usr/bin/vim")
+options(stringsAsFactors=FALSE)
+
+plotQQ_channels<- function(set, transformed=TRUE) {
+    # set: a MSnSet object, eg,set227
+    # transformed: boolean, if TRUE then take the asinh() of abundances
+    m <- exprs(set)
+    for (i in seq(ncol(m))) {
+        if (transformed){
+            print(qqnorm(asinh(exprs(set)[,i]), main=colnames(exprs(set))[i], cex=0.7))
+            print(qqline(asinh(exprs(set)[,i]), col='grey'))
+        } else {
+            print(qqnorm(exprs(set)[,i], main=colnames(exprs(set))[i], cex=0.7))
+            print(qqline(exprs(set)[,i], col='grey'))
+        }
+    }
+}
+
+useAnalysisFile <- TRUE
+if (!useAnalysisFile) {
+    # replace '-' each time it is found with another string
+    replReplacmnt <- function(cv) {
+        # replenish replacement
+        # cv: a character vector
+        n <- 0
+        for (i in seq(length(cv))) {
+            if (cv[i] == '-' || is.na(cv[i])) {
+                n <- n + 1
+                #cv[i] <- paste('NoSymbol', n, sep='_')
+                cv[i] <- names(cv[i])
+            }
+        }
+        return(cv)
+    }
+}
+
+testsym <- NULL
+pplotDE <- function(lmf, tt, contrast, annot, aspdf) {
+    # lmf: output from lmFit()
+    # tt: output from topTable() with fixed contrast
+    # contrast: eg., T5vsT4 for title
+    # annot: either 'gene' or 'acc' (or some other string)
+    # aspdf: boolean, TRUE if output to pdf
+    m <- lmf$coefficient
+    df <- as.data.frame(m)
+    df <- df[rownames(df) %in% rownames(tt), ]
+    genesym <- unlist(mget(rownames(df), eacc2sym, ifnotfound=unlist(mget(rownames(df), eBBacc2sym, ifnotfound=rownames(df)))))
+    #genesym <- replReplacmnt(genesym)
+    testsym <<- genesym
+    if (annot=='gene') rownames(df) <- genesym
+    
+    if (aspdf) {
+        pdf(paste(paste(paste(UP1PATH, 'Pres/Slides_27JAN17', sep='/'), paste('deProteins', contrast, sep='_'), sep='/'), 'pdf', sep='.'))
+        #quartz('',5.5, 4.5)
+        gplot_parallel(df, df, contrast)
+        dev.off()
+    } else {
+        quartz('',5.5, 4.5)
+        gplot_parallel(df, df, contrast)
+    }
+}
+
+## not necessary when running appxd
+#Sweave('~/Dropbox/Harvard/MeltonProteomics/ds_functions_21JAN17.Rnw')
+#Sweave('~/Dropbox/Harvard/MeltonProteomics/ds_resources_21JAN17.Rnw')
+
+
+@ 
+%%====== ALL SAMPLES DE ANALYSIS ======
+%%====== INTERSECTION OF SAMPLES ======
+%% redundant see ds_analysis_21JAN17.Rnw
+<<label=limma, echo=FALSE, eval=TRUE>>=
+design <- model.matrix(~ 0+factor(rep(seq(0, 5), 4)))
+colnames(design) <- c('t1', 't2', 't3', 't4', 't5', 't6')
+fit <- lmFit(mses, design)
+
+contrast.matrix <- makeContrasts(t2 - t1, t3 - t2, t4 - t3, t5 - t4, t6 - t5, levels=design)
+fit2 <- contrasts.fit(fit, contrast.matrix)
+fit2 <- eBayes(fit2)
+
+@ 
+
+<<label=toptables, echo=FALSE, eval=TRUE>>=
+c1 <- topTable(fit2, coef=1, adjust='BH', number=24)
+c1map <- unlist(mget(rownames(c1), eacc2sym, ifnotfound=unlist(mget(rownames(c1), eBBacc2sym, ifnotfound=rownames(c1)))))
+c2 <- topTable(fit2, coef=2, adjust='BH', number=35)
+c2map <- unlist(mget(rownames(c2), eacc2sym, ifnotfound=unlist(mget(rownames(c2), eBBacc2sym, ifnotfound=rownames(c2)))))
+c3 <- topTable(fit2, coef=3, adjust='BH', number=2)
+c3map <- unlist(mget(rownames(c3), eacc2sym, ifnotfound=unlist(mget(rownames(c3), eBBacc2sym, ifnotfound=rownames(c3)))))
+c4 <- topTable(fit2, coef=4, adjust='BH', number=11)
+c4map <- unlist(mget(rownames(c4), eacc2sym, ifnotfound=unlist(mget(rownames(c4), eBBacc2sym, ifnotfound=rownames(c4)))))
+c5 <- topTable(fit2, coef=5, adjust='BH', number=30)
+c5map <- unlist(mget(rownames(c5), eacc2sym, ifnotfound=unlist(mget(rownames(c5), eBBacc2sym, ifnotfound=rownames(c5)))))
+
+res <- decideTests(fit2)
+
+@ 
+%%====== UNION OF ALL SAMPLES - unbalanced DE analysis ======
+%% D032117
+<<label=unbalancedlimma, echo=FALSE, eval=TRUE>>=
+newfit <- lmFit(newmss, design)
+newfit2 <- contrasts.fit(newfit, contrast.matrix)
+newfit2 <- eBayes(newfit2)
+
+@ 
+% D031417, separate from label=toptables
+<<label=vennplot, echo=FALSE, eval=FALSE>>=
+pdf(paste(UP1PATH, 'Pres/Slides_27JAN17/venn_DEproteins.pdf', sep='/'))
+vennDiagram(res)
+dev.off()
+
+@ 
+
+% added D031017: plot all significantly DE proteins on ECDF
+% modified D031417: implementing and using plotECDF_v2()
+<<label=ecdfallsign, echo=FALSE, eval=FALSE>>=
+require(ggrepel)
+mostlysig <- rownames(rbind(c1, c2, c3, c4, c5))
+mostlysig <- unique(c(mostlysig, 'D2IYK3', 'J7H3Y9', 'Q9H6I2', 'P52945', 'P78426', 'P01308', 'P01275'))
+mss.df <- as.data.frame(exprs(mss))
+mostlyc1.df <- mss.df[rownames(mss.df) %in% rownames(c1),]
+# plot is for testing, comment out when run shiny app
+#plotECDF_v2(mostlyc1.df, mss.df, 's227') # defined in ds_functions_21JAN17.Rnw
+
+# capture plot as pdf in plotECDF(): ds_functions_21JAN17.Rnw
+#pdf(paste(UP1PATH, 'Pres/Plots_dima10MAR17/ecdfPlotMostlySign.pdf', sep='/'))
+
+# D031717: take average over all samples
+s0c.ix <- grep('S0c', colnames(mss.df))
+s1c.ix <- grep('S1c', colnames(mss.df))
+s2c.ix <- grep('S2c', colnames(mss.df))
+s3c.ix <- grep('S3c', colnames(mss.df))
+s4c.ix <- grep('S4c', colnames(mss.df))
+s5c.ix <- grep('S5c', colnames(mss.df))
+
+# averaging over samples
+mmss.df <- apply(mss.df, 1, function(x) {
+    a <- c(mean(x[s0c.ix]), mean(x[s1c.ix]), mean(x[s2c.ix]), mean(x[s3c.ix]), mean(x[s4c.ix]), mean(x[s5c.ix]))
+    return(a)
+})
+
+mmss.df <- as.data.frame(t(mmss.df))
+colnames(mmss.df) <- c('S0c', 'S1c', 'S2c', 'S3c', 'S4c', 'S5c')
+mostlyc1.df  <- mmss.df[rownames(mmss.df) %in% rownames(c1),]
+mostlyc2.df  <- mmss.df[rownames(mmss.df) %in% rownames(c2),]
+mostlyc3.df  <- mmss.df[rownames(mmss.df) %in% rownames(c3),]
+mostlyc4.df  <- mmss.df[rownames(mmss.df) %in% rownames(c4),]
+mostlyc5.df  <- mmss.df[rownames(mmss.df) %in% rownames(c5),]
+
+#Sweave(paste(USEPATH, 'ds_functions_21JAN17.Rnw', sep='/'))
+#plotECDF_v4(mostlyc4.df, mmss.df, 'S4c') # defined in ds_functions_21JAN17.Rnw
+
+# D032017
+markerlst <- list(S1c=c('B0ZTD4', 'Q9H612', 'Q15464'),
+                  S2c=c('P52945', 'Q9Y261', 'Q94612', 'P43694', 'P48436'),
+                  S3c=c('P52945', 'Q9Y261', 'P43694', 'Q92908', 'P48436', 'P78426'),
+                  S4c=c('P52945', 'Q9Y261', 'P78426', 'O95096', 'Q8HWS3', 'P01308', 'Q8NHW3', 'Q9Y5Q3', 'P50219', 'D3DQZ8', 'P61371'),
+                  S5c=c('P52945', 'Q9Y261', 'P78426', 'O95096', 'Q8HWS3', 'P01308', 'Q8NHW3', 'Q9Y5Q3', 'P50219', 'P26367', 'A8K3X7'))
+markers <- unique(as.character(unlist(markerlst)))
+
+#plotECDF_v5(mmss.df, 'S4c', rownames(c1), markerlst[[1]]) # defined in ds_functions_21JAN17.Rnw
+plotECDF_v5(mmss.df, 'S5c', rownames(c5), markers) # defined in ds_functions_21JAN17.Rnw
+
+@
+% D032117: ecdf plots using unbalanced coefficients, see label=unbalancedlimma
+<<label=ecdfplots, echo=FALSE, eval=TRUE>>=
+#Sweave(paste(USEPATH, 'ds_functions_21JAN17.Rnw', sep='/'))
+markerlst <- list(S1c=c('B0ZTD4', 'Q9H612', 'Q15464'),
+                  S2c=c('P52945', 'Q9Y261', 'Q94612', 'P43694', 'P48436'),
+                  S3c=c('P52945', 'Q9Y261', 'P43694', 'Q92908', 'P48436', 'P78426'),
+                  S4c=c('P52945', 'Q9Y261', 'P78426', 'O95096', 'Q8HWS3', 'P01308', 'Q8NHW3', 'Q9Y5Q3', 'P50219', 'D3DQZ8', 'P61371'),
+                  S5c=c('P52945', 'Q9Y261', 'P78426', 'O95096', 'Q8HWS3', 'P01308', 'Q8NHW3', 'Q9Y5Q3', 'P50219', 'P26367', 'A8K3X7'))
+markers <- unique(as.character(unlist(markerlst)))
+dimaprots <- c('Q01860', 'Q9H9S0', 'Q9H6I2', 'P52945', 'P78426', 'P01308', 'P01275') # Oct4, Nanog, Sox17, Pdx1, Nkx6.1, insulin, glucagon (D020917)
+markers <- unique(c(markers, dimaprots))
+
+df <- as.data.frame(newfit$coef)
+colnames(df) <- c('S0c', 'S1c', 'S2c', 'S3c', 'S4c', 'S5c')
+#plotECDF_v5(df, 'S5c', rownames(c5), markers) # defined in ds_functions_21JAN17.Rnw
+
+@ 
+<<label=plotresults, echo=FALSE, results=tex, eval=FALSE>>=
+require(xtable)
+addAnnotFit <- function(lmf, tt) {
+    # lmf: output from lmFit()
+    # tt: output from topTable() with fixed contrast
+    # contrast: eg., T5vsT4 for title
+    # annot: either 'gene' or 'acc' (or some other string)
+    m <- lmf$coefficient
+    df <- as.data.frame(m)
+    df <- df[rownames(df) %in% rownames(tt), ]
+    pname <- unlist(mget(rownames(df), eacc2name, ifnotfound=unlist(mget(rownames(df), eBBacc2name, ifnotfound=rownames(df)))))
+    df <- data.frame(Name=pname,df)
+    genesym <- unlist(mget(rownames(df), eacc2sym, ifnotfound=unlist(mget(rownames(df), eBBacc2sym, ifnotfound=rownames(df)))))
+    df <- data.frame(Symbol=genesym, df)
+}
+
+xf <- addAnnotFit(fit, c1)
+
+useFunctionFile <- TRUE
+if (!useFunctionFile) {
+    # copied to ds_functions_21JAN17.Rnw
+    addAnnotTt <- function(tt) {
+        # tt: output from topTable() with fixed contrast, eg., c1
+        # contrast: eg., T5vsT4 for title
+        # annot: either 'gene' or 'acc' (or some other string)
+        pname <- unlist(mget(rownames(tt), eacc2name, ifnotfound=unlist(mget(rownames(tt), eBBacc2name, ifnotfound=rownames(tt)))))
+        df <- data.frame(Name=pname,tt)
+        genesym <- unlist(mget(rownames(tt), eacc2sym, ifnotfound=unlist(mget(rownames(tt), eBBacc2sym, ifnotfound=rownames(tt)))))
+        df <- data.frame(Symbol=genesym, df)
+        df$logFC <- ifelse(df$logFC < 0, -2^(-df$logFC), 2^df$logFC)
+        df <- df[, c(1:3, 7)]
+        colnames(df) <- c('Symbol', 'Name', 'FC', 'pval')
+        return(df)
+    }
+}
+
+c1Table <- addAnnotTt(c1)
+xtable(c1Table)
+c2Table <- addAnnotTt(c2)
+xtable(c2Table)
+c3Table <- addAnnotTt(c3)
+xtable(c3Table)
+c4Table <- addAnnotTt(c4)
+xtable(c4Table)
+c5Table <- addAnnotTt(c5)
+xtable(c5Table)
+
+write.csv(c1Table, file=paste(UP1PATH, 'Pres/Slides_Dima/c1Table.csv', sep='/'), quote=FALSE)
+write.csv(c2Table, file=paste(UP1PATH, 'Pres/Slides_Dima/c2Table.csv', sep='/'), quote=FALSE)
+write.csv(c3Table, file=paste(UP1PATH, 'Pres/Slides_Dima/c3Table.csv', sep='/'), quote=FALSE)
+write.csv(c4Table, file=paste(UP1PATH, 'Pres/Slides_Dima/c4Table.csv', sep='/'), quote=FALSE)
+write.csv(c5Table, file=paste(UP1PATH, 'Pres/Slides_Dima/c5Table.csv', sep-'/'), quote=FALSE)
+ 
+testsym <- NULL
+pplotDE <- function(lmf, tt, contrast, annot, aspdf) {
+    # lmf: output from lmFit()
+    # tt: output from topTable() with fixed contrast
+    # contrast: eg., T5vsT4 for title
+    # annot: either 'gene' or 'acc' (or some other string)
+    # aspdf: boolean, TRUE if output to pdf
+    m <- lmf$coefficient
+    df <- as.data.frame(m)
+    df <- df[rownames(df) %in% rownames(tt), ]
+    genesym <- unlist(mget(rownames(df), eacc2sym, ifnotfound=unlist(mget(rownames(df), eBBacc2sym, ifnotfound=rownames(df)))))
+    #genesym <- replReplacmnt(genesym)
+    testsym <<- genesym
+    if (annot=='gene') rownames(df) <- genesym
+    
+    if (aspdf) {
+        pdf(paste(paste(paste(UP1PATH, 'Pres/Slides_27JAN17', sep='/'), paste('deProteins', contrast, sep='_'), sep='/'), 'pdf', sep='.'))
+        #quartz('',5.5, 4.5)
+        gplot_parallel(df, df, contrast)
+        dev.off()
+    } else {
+        quartz('',5.5, 4.5)
+        gplot_parallel(df, df, contrast)
+    }
+}
+
+
+pplotDE(fit, c1, 'T2vsT1', annot='prot', FALSE) 
+pplotDE(fit, c2, 'T3vsT2', annot='prot', FALSE)
+pplotDE(fit, c3, 'T4vsT3', annot='prot', FALSE)
+pplotDE(fit, c4, 'T5vsT4', annot='prot', FALSE)
+pplotDE(fit, c5, 'T6vsT5', annot='prot', FALSE)
+
+@
+<<plottinginsetcD2217, echo=FALSE, eval=FALSE>>=
+multiParallelPlot <- function(adf, df) {
+    ## both parameters are data frames
+    # replace acc with symbols
+    sym <- unlist(mget(rownames(adf), eacc2sym, ifnotfound=unlist(mget(rownames(adf), eBBacc2sym, ifnotfound=rownames(adf)))))
+    message(sym)
+    #sym <- replReplacmnt(sym)
+    rownames(adf) <- sym
+    
+    cnames <- as.character(colnames(adf))
+    xl <- strsplit(cnames, split='_')
+    xl <- lapply(xl, function(x) x[1])
+    x <- sub('S', '', unlist(xl))
+    spls <- unique(x)
+
+    count <- 0
+    pl <- NULL
+    for (spl in spls) {
+        count <- count + 1
+        ixs <- grep(spl, colnames(df))
+        pl[[count]] <- gplot_parallel(adf[, ixs], df[, ixs], spl)
+    }
+    return(pl)
+}
+
+## BUG: make sure it works with single accession!! fixed in genSubsetAbundMat()
+aprots <- c('P01308', 'P61278', 'P01275') # insulin, somatostatin, glucagon
+aprots.df <- as.data.frame(exprs(mses)[rownames(exprs(mses)) %in% aprots,])
+
+protset.df <- aprots.df
+p <- multiParallelPlot(protset.df, exprs(mses))
+#pdf(paste(paste(UP1PATH, 'Pres/Slides_27JAN17', sep='/'), paste('INS_GCG_SST', 'pdf', sep='.'), sep='/'))
+do.call(multiplot, c(p,cols=2)) # ok, but nicer!
+#dev.off()
+
+@ 
+<<label=multipplotscodeD2417, echo=FALSE, eval=TRUE>>=
+## which samples contain protein
+
+
+presentNSamples_v1<- function(pv, accl) {
+    ## list of prot in pv which are detected in samples
+    ## names of list elements are the proteins in pv; components are vectors of 0's and 1's indicating
+    ## whether protein is in sample(1) or not(0)
+    # pv: vector of protein accessions
+    # accl: list of sample accessions, eg, acclst (see below)
+    inlst <- list()
+    for (acc in pv) {
+        isinlst <- lapply(accl, function(x, acc) {
+            sum(x %in% acc)
+        }, acc)
+        inlst[[acc]] <- unlist(isinlst)
+    }
+    return(inlst)
+}
+
+## !!Use this function!!
+presentNSamples <- function(pv, accl) {
+    ## returns a list of samples which have abundances of prot in pv
+    ## names of list elements are the samples; components are vectors of the proteins detected in the sample
+    # pv: vector of protein accessions
+    # accl: list of sample accessions, eg, acclst
+    inlst <- list()
+    for (i in seq(length(accl))) {
+        x <- accl[[i]][accl[[i]] %in% pv]
+        inlst[[i]] <- x
+    }
+    names(inlst) <- names(accl)
+    return(inlst)
+}
+
+genSubsetAbundMat_v0<- function(isinlst, mssl) { # function(isinlst, exprlst, pd) {} ; first/original version
+    ## to generate matrices like endod.df or pendod.df
+    # isinlst: output from presentNSamples()
+    #mssl: mssl <- makeMSnSetfromSampleSubsets(xl, pd); xl <-  makeSubsetExprMatrix(1, exprlst) 
+    reslst <- list()
+    for (nm in names(isinlst)) {
+        ## BUG, what went wrong (2817)
+        # using proteins: "P52945" "P78426" "Q7RTS3" "P48436" "P35680" "Q9UBC0"
+        # az <- presentNSamples(a, acclst): "P52945" "Q9UBC0" "P35680" are in sample 238
+        # laz <- genSubsetAbundMat(az, msl): only one protein(P52945) has abundances
+        # x238.df[x238.df$Accession %in% az[['s238']], c(3, 32:37)] this confirms it
+        ## FIXED: simplest remedy: replace list elements of acclst (x227.df$Accession etc) with r227.df$Accession etc (rm rows without quantitation
+        # r227.df generated ds_resources_21JAN17.Rnw:label=datamatricesnotnormalized
+        if (length(isinlst[[nm]]) != 0) {
+            if (length(isinlst[[nm]]) == 1) {
+                x <- exprs(mssl[[nm]])[rownames(exprs(mssl[[nm]])) %in% isinlst[[nm]],]
+                df <- data.frame(as.list(x))
+                rownames(df) <- isinlst[[nm]]
+            } else  if (length(isinlst[[nm]]) > 1) { # in case none of the proteins is in any sample (Link-1)
+                df <- as.data.frame(exprs(mssl[[nm]])[rownames(exprs(mssl[[nm]])) %in% isinlst[[nm]],])
+            }
+            reslst[[nm]] <- df
+        }
+    }
+    return(reslst)
+}
+
+# D21017
+genSubsetAbundMat <- function(isinlst, mssl, logtr) { # function(isinlst, exprlst, pd) {}
+    ## to generate matrices like endod.df or pendod.df
+    # isinlst: output from presentNSamples()
+    # mssl: mssl <- makeMSnSetfromSampleSubsets(xl, pd); xl <-  makeSubsetExprMatrix(1, exprlst) 
+    # logtr: boolean, whether or not log transform abundances; FALSE means no log transformation
+    reslst <- list()
+    for (nm in names(isinlst)) {
+        if (!logtr) {
+            exprs(mssl[[nm]]) <- 10^exprs(mssl[[nm]])
+        }
+        
+        if (length(isinlst[[nm]]) != 0) {
+            if (length(isinlst[[nm]]) == 1) {
+                x <- exprs(mssl[[nm]])[rownames(exprs(mssl[[nm]])) %in% isinlst[[nm]],]
+                df <- data.frame(as.list(x))
+                rownames(df) <- isinlst[[nm]]
+            } else  if (length(isinlst[[nm]]) > 1) { # in case none of the proteins is in any sample (Link-1)
+                df <- as.data.frame(exprs(mssl[[nm]])[rownames(exprs(mssl[[nm]])) %in% isinlst[[nm]],])
+            }
+            reslst[[nm]] <- df
+        }
+    }
+    return(reslst)
+}
+
+gmultiParallelPlot_v1 <- function(sl, el) {
+    ## diff between multiParallelPlot() and multiParallelPlot_v1: in v1 both parameters are lists
+    ## uses eacc2sym, a hash table, generated in ds_resources_21JAN17.Rnw:label=proteinannotD2717
+    # sl: list of subset MSnSets, generated with genSubsetAbundMat()
+    # el: list of MSnSets, generated with makeMSnSetfromSampleSubsets()
+    pl <- NULL
+    for (nm in names(sl)) { # important to loop over sl, since there may not be data frames from all samples, see Link-1
+        # replace acc with symbols
+        sym <- unlist(mget(rownames(sl[[nm]]), eacc2sym, ifnotfound=unlist(mget(rownames(sl[[nm]]), eBBacc2sym, ifnotfound=rownames(sl[[nm]])))))
+        #sym <- replReplacmnt(sym)
+        rownames(sl[[nm]]) <- sym
+
+        xnm <- sub('s', '', nm)
+        pl[[nm]] <- gplot_parallel(sl[[nm]], exprs(el[[nm]]), xnm)
+    }
+    return(pl)
+}
+
+multiParallelPlot_v2 <- function(sl, el, logtr) {
+    ## modification of version 1
+    ## abundance values log transformed or not
+    # logtr: boolean, TRUE: use log transformed values, FALSE: use linear untransformed values
+    pl <- NULL
+    for (nm in names(sl)) { # important to loop over sl, since there may not be data frames from all samples, see Link-1
+        # replace acc with symbols
+        sym <- unlist(mget(rownames(sl[[nm]]), eacc2sym, ifnotfound=unlist(mget(rownames(sl[[nm]]), eBBacc2sym, ifnotfound=rownames(sl[[nm]])))))
+        #sym <- replReplacmnt(sym)
+        rownames(sl[[nm]]) <- sym
+        
+        if(!logtr) {
+            exprs(el[[nm]]) <- 10^exprs(el[[nm]])
+        }
+
+        xnm <- sub('s', '', nm)
+        pl[[nm]] <- gplot_parallel(sl[[nm]], exprs(el[[nm]]), xnm)
+    }
+    return(pl)
+}
+
+# Note D031017: looks like the el parameter is not necessary!!
+multiBarPlot <- function(sl, el) {
+    # D031017: sl, a list of data frames, returned from genSubsetAbundMat()
+    pl <- NULL
+    for (nm in names(sl)) { # important to loop over sl, since there may not be data frames from all samples, see Link-1
+        sym <- unlist(mget(rownames(sl[[nm]]), eacc2sym, ifnotfound=unlist(mget(rownames(sl[[nm]]), eBBacc2sym, ifnotfound=rownames(sl[[nm]])))))
+        #sym <- replReplacmnt(sym)
+        rownames(sl[[nm]]) <- sym
+
+        xnm <- sub('s', '', nm)
+        #pl[[nm]] <- lattice_barchart(sl[[nm]])
+        pl[[nm]] <- gplot_barplot(sl[[nm]])
+    }
+    return(pl)
+}
+
+@ 
+
+%% now we use the above code to parallelplot a few lists of proteins
+<<label=multipplotsprotlistsD2717, echo=FALSE, eval=FALSE>>=
+require(gridExtra)
+## endoderm
+endod <- c('Q9H6I2', 'Q9Y261', 'Q96S42', 'Q04771') # Sox17, FoxA2(Hnf3beta), Nodal, activin A(Activin receptor type-1)
+endod.df <- as.data.frame(exprs(mses)[rownames(exprs(mses)) %in% endod,])
+
+## pancreatic endoderm
+pendod <- c('P52945', 'P78426', 'Q7RTS3', 'P48436', 'P35680', 'Q9UBC0', # Pdx1, Nkx6.1, Ptf1a, Sox9, Hnf1b (Tcf2), Hnf6 (Onecut1)
+            'Q92786', 'P41235', 'P20823')  # Prox1, Hnf4A, Hnf1A
+pendod.df <- as.data.frame(exprs(mses)[rownames(exprs(mses)) %in% pendod,, drop=FALSE])
+
+## Pagliuca et al. Cell 2014
+pagNames <- c('Act A/Activin', 'FGF7/KGF', 'GSK3alpha/beta', 'Betacellulin', 'protein kinase C',
+            'ALK-5[TGF-beta receptor type-1/Activin receptor-like kinase 5]', 'gamma-secretase', 'BMP type 1 receptor')
+pag <- c('P08476', 'P21781', 'P49840', 'P49841', 'P35070', 'P17252', 'Q05513', 'P05771', 'P24723', 'P05129', 'Q05655', 'P41743',
+         'Q02156', 'Q04759', 'P36897', 'P49768', 'Q92542', 'Q96BI3', 'Q8WW43', 'Q9NZ42', 'O00238', 'P36894')
+
+
+pagMolecules <- c('Retinoic Acid/RA[metabolite of vitamin A]', 'Alk5 inhibitor',
+'T3[triiodothyronine, a thyroid hormone]', 'XXI[gamma-secretase inhibitor]', 'Heparin',
+'PdbU[Phorbol 12,13-dibutyrate, protein kinase C inhibitor', 'LDN[LDN193189, BMP type 1 receptor inhibitor]',
+'CHIR[CHIR99021, a GSK3alpha/beta inhibitor]', 'SANT1')
+
+ecrine <- c('P52945', 'P78426', 'Q8NHW3', 'Q9Y4Z2', 'P43220', 'Q969E3') # Pdx1, Nkx6.1, Mafa, Neurog3, exendin-4, urocortin-3
+
+acclst <- list(s227=r227.df$Accession, s238=r238.df$Accession, s239=r239.df$Accession, s243=r243.df$Accession)
+xl <-  makeSubsetExprMatrix(1, adat.lst) # adat.lst in resources:label=msnsetfromsubsets
+msl <- makeMSnSetfromSampleSubsets(xl, p.df) # p.df in resources:label=MSnSetcombined
+
+protlst <- list(endo=endod, pendo=pendod, pagl=pag, ecc=ecrine)
+fnlst <- list(endo='endodermProt.pdf', pendo='pancEndodrmProt.pdf', pagl='pagliucaCellProt.pdf', ecc='endocrineProt.pdf')
+
+if(FALSE) {
+    for (nm in names(protlst)) {
+        z <- presentNSamples(protlst[[nm]], acclst)
+        df.lst <- genSubsetAbundMat(z, msl, TRUE)
+        p <- multiParallelPlot_v1(df.lst, msl)
+        pdf(paste(paste(UP1PATH, 'Pres/Slides_Dima', sep='/'), fnlst[[nm]], sep='/'))
+        do.call(multiplot, c(p,cols=2)) # ok, and nicer!
+        dev.off()
+    }
+}
+
+someprots <- c('P52945', 'P78426', 'Q7RTS3', 'P48436', 'P35680', 'Q9UBC0')
+otherprots <- 'Q7RTS3' #'P52945'
+dimaprots <- c('Q01860', 'Q9H9S0', 'Q9H6I2', 'P52945', 'P78426', 'P01308', 'P01275') # Oct4, Nanog, Sox17, Pdx1, Nkx6.1, insulin, glucagon (D2917)
+dima1 <- c('Q01860', 'D2IYK3', 'Q9H9S0', 'J7H3Y9') # Oct4, Nanog
+# D2IYK3 J7H3Y9 Q9H6I2 P52945 P78426 P01308 P01275
+# A8K9T3 B2R6T2 O43174 B2R6E3 A0A024R3C6 Q9H4F8 DE S3c vs S2c at p<=2.2
+
+if (FALSE) {
+    ## D22517
+    ## see BELOW for file
+    s3cMarkers.df <- read.table('TempData/cluster_with_protein_B2R6T2', sep='\t', quote='')
+    s3cMarkers.acc <- rownames(s3cMarkers.df)
+    s3cMarkers.sym <- unlist(mget(s3cMarkers.acc, eacc2sym, ifnotfound=unlist(mget(s3cMarkers.acc, eBBacc2sym, ifnotfound=s3cMarkers.acc))))
+}
+
+z <- presentNSamples(dimaprots, acclst)
+df.lst <- genSubsetAbundMat(z, msl, TRUE)
+#p <- multiParallelPlot_v1(df.lst, msl) # parallelplot
+p <- multiBarPlot(df.lst, msl)
+if (is.null(p)) {
+    message('!!Protein not found') 
+} else {
+    #grid.arrange(p[[1]], p[[2]], ncol=1) # uses gridExtra
+    do.call(grid.arrange, c(p[1:2], ncol=1)) # uses gridExtra
+    #do.call(multiplot, c(p,cols=2))
+}
+
+@ 
+<<label=multiecdfplot, echo=FALSE, eval=FALSE>>=
+# code is in ds_analysis_21JAN17.Rnw
+pcdf <- multiEcdfPlot(df.lst, msl)
+
+
+@ 
+<<label=uselevelplot, echo=FALSE, eval=TRUE>>=
+require(latticeExtra)
+# require(geneplotter) # dChip.colors()
+require(gplots) # redgreen()
+useLevelplot <- function(df, main='Levelplot', filename='levelplot', qual='Protein', scale=TRUE, pdf=FALSE) {
+    if (scale) {
+        sdf <- df #scale(df)
+        tsdf <- scale(t(sdf))
+    }
+    dd.row <- as.dendrogram(hclust(stats::dist(tsdf)))
+    row.ord <- order.dendrogram(dd.row)
+
+    dd.col <- as.dendrogram(hclust(stats::dist(sdf)))
+    col.ord <<- order.dendrogram(dd.col)
+    
+    upplot <- levelplot(tsdf[row.ord,col.ord],
+                        aspect='iso',
+                        scales=list(x=list(rot=90,draw=TRUE,tck=0.5,cex=0.6),y=list(cex=0.7,draw=TRUE)),
+                        colorkey=list(space="left",col=redgreen(2000)),
+                        col.regions=redgreen(2000),
+                        #main=paste(main, qual),
+                        main=main,
+                        xlab='',
+                        ylab='',
+                        legend=list(right=list(fun=dendrogramGrob,args=list(x=dd.col,ord=col.ord,side="right",size=5)),
+                                    top=list(fun=dendrogramGrob,args=list(x=dd.row,side="top",type="rectangle",size=1)))
+                        )
+    if (pdf) {
+        s <- unlist(strsplit(date(), ' '))[c(3, 2, 5, 4)]
+        s[4] <- paste(unlist(strsplit(s[4], ':')), collapse='')
+        s <- paste(s, collapse='')
+        fname <- paste(paste(filename, qual, s, sep='_'), 'pdf', sep='.')
+                                           
+        pdf(fname)
+        print(upplot)
+        dev.off()
+    } else {
+        print(upplot)
+    }
+}
+
+# modified: remove sample clustering; samples should not be clustered since they are ordered D22117
+useLevelplot_v1<- function(df, main='', filename='levelplot', qual='Protein', scale=TRUE, pdf=FALSE) {
+    if (scale) {
+        sdf <- df #scale(df)
+        tsdf <- scale(t(sdf))
+    }
+    dd.row <- as.dendrogram(hclust(stats::dist(tsdf)))
+    row.ord <- order.dendrogram(dd.row)
+
+    dd.col <- as.dendrogram(hclust(stats::dist(sdf)))
+    col.ord <<- order.dendrogram(dd.col)
+    
+    upplot <- levelplot(tsdf[,col.ord],
+                        aspect='iso',
+                        scales=list(x=list(rot=90,draw=TRUE,tck=0.5,cex=0.6),y=list(cex=0.7,draw=TRUE)),
+                        colorkey=list(space="left",col=redgreen(2000)),
+                        col.regions=redgreen(2000),
+                        #main=paste(main, qual),
+                        main=main,
+                        xlab='',
+                        ylab='',
+                        legend=list(right=list(fun=dendrogramGrob,args=list(x=dd.col,ord=col.ord,side="right",size=5)))#,
+                                    #top=list(fun=dendrogramGrob,args=list(x=dd.row,side="top",type="rectangle",size=1)))
+                        )
+    if (pdf) {
+        s <- unlist(strsplit(date(), ' '))[c(3, 2, 5, 4)]
+        s[4] <- paste(unlist(strsplit(s[4], ':')), collapse='')
+        s <- paste(s, collapse='')
+        fname <- paste(paste(filename, qual, s, sep='_'), 'pdf', sep='.')
+                                           
+        pdf(fname)
+        print(upplot)
+        dev.off()
+    } else {
+        print(upplot)
+    }
+}
+
+# ====== modifications D22317 and D22417 ======
+# used when CLUSTER ALL PROTEINS
+# modified D22717: changed parameters
+useLevelplot_v2<- function(tdf, cdd, main='', filename='levelplot', qual='Protein', pdf=FALSE) {
+    # rdd and cdd: dendrograms of row and column cluster objects, resp.
+    col.ord <- order.dendrogram(cdd)
+    upplot <- levelplot(tdf[,col.ord],
+                        aspect=3,
+                        scales=list(x=list(rot=90,draw=TRUE,tck=0.5,cex=0.6),y=list(cex=0.7,draw=FALSE)),
+                        colorkey=list(space="left",col=redgreen(2000)),
+                        col.regions=redgreen(2000),
+                        main=main,
+                        xlab='',
+                        ylab='',
+                        legend=list(right=list(fun=dendrogramGrob,args=list(x=cdd,ord=col.ord,side="right",size=5)))
+                        )
+    if (pdf) {
+        s <- unlist(strsplit(date(), ' '))[c(3, 2, 5, 4)]
+        s[4] <- paste(unlist(strsplit(s[4], ':')), collapse='')
+        s <- paste(s, collapse='')
+        fname <- paste(paste(filename, qual, s, sep='_'), 'pdf', sep='.')
+                                           
+        pdf(fname)
+        print(upplot)
+        dev.off()
+    } else {
+        print(upplot)
+    }
+}
+
+useLevelplot_v3 <- function(df, main='', filename='levelplot', qual='Protein', scale=TRUE, pdf=FALSE) {
+    # omit row names if input data.frame has more than 100 rows
+    if (dim(df)[1] > 100) {
+        draw <- FALSE
+    } else {
+        draw <- TRUE
+        sym <- unlist(mget(rownames(df), eacc2sym, ifnotfound=unlist(mget(rownames(df), eBBacc2sym, ifnotfound=rownames(df)))))
+        sym <- sapply(sym, function(x) unlist(strsplit(x, split=';'))[1])
+        rownames(df) <- sym
+    }
+    
+    if (scale) {
+        df <- scale(df)
+        sdf <- df
+        tsdf <- t(sdf)
+    }
+    
+    dd.row <- as.dendrogram(hclust(stats::dist(tsdf)))
+    row.ord <- order.dendrogram(dd.row)
+
+    dd.col <- as.dendrogram(hclust(stats::dist(sdf)))
+    col.ord <<- order.dendrogram(dd.col)
+    
+    upplot <- levelplot(tsdf[,col.ord],
+                        aspect='iso',
+                        scales=list(x=list(rot=90,draw=TRUE,tck=0.5,cex=0.6),y=list(cex=0.5,draw=draw)),
+                        colorkey=list(space="left",col=redgreen(2000)),
+                        col.regions=redgreen(2000),
+                        #main=paste(main, qual),
+                        main=main,
+                        xlab='',
+                        ylab='',
+                        legend=list(right=list(fun=dendrogramGrob,args=list(x=dd.col,ord=col.ord,side="right",size=5)))#,
+                                    #top=list(fun=dendrogramGrob,args=list(x=dd.row,side="top",type="rectangle",size=1)))
+                        )
+    if (pdf) {
+        s <- unlist(strsplit(date(), ' '))[c(3, 2, 5, 4)]
+        s[4] <- paste(unlist(strsplit(s[4], ':')), collapse='')
+        s <- paste(s, collapse='')
+        fname <- paste(paste(filename, qual, s, sep='_'), 'pdf', sep='.')
+                                           
+        pdf(fname)
+        print(upplot)
+        dev.off()
+    } else {
+        print(upplot)
+    }
+}
+
+# new version, select and plot cluster that contains a protein given as a parameter
+clustHeatSubcluster <- function(df, colclust, nclust=7, protein=NULL, main='', filename='levelplot', qual='Protein', scale=TRUE, pdf=FALSE) {
+    # purpose: select cluster that contains protein
+    # colclust: object returned from hclust(), interested only in protein clusters not sample clusters
+    # nclust: total number of clusters
+    # protein: a protein accession
+    tosym <- TRUE
+    xdf <- df
+    y <- stats::cutree(colclust, k=nclust)
+    clust <- as.integer(y[names(y) == protein])
+    prots <- names(y[y==clust])
+    sz <- length(prots)
+    if (sz >= 70) {
+        for (n in seq(nclust+10, 100, by=10)) {
+            y <- stats::cutree(colclust, k=n)
+            clust <- as.integer(y[names(y) == protein])
+            prots <- names(y[y==clust])
+            if (length(prots) <= 70) {
+                xdf <- xdf[rownames(xdf) %in% prots,]
+                #write.table(xdf, file=paste('TempData', paste('cluster', 'with', 'protein', protein, sep='_'), sep='/'), quote=FALSE, sep='\t')
+             
+                if (tosym) {
+                    sym <- unlist(mget(rownames(xdf), eacc2sym, ifnotfound=unlist(mget(rownames(xdf), eBBacc2sym, ifnotfound=rownames(xdf)))))
+                    sym <- sapply(sym, function(x) unlist(strsplit(x, split=';'))[1])
+                    rownames(xdf) <- sym
+                }
+                useLevelplot_v1(xdf,scale=TRUE, pdf=FALSE)
+                break
+            }
+        }
+    } else {
+        xdf <- xdf[rownames(xdf) %in% prots,]
+        
+        if (tosym) {
+            sym <- unlist(mget(rownames(xdf), eacc2sym, ifnotfound=unlist(mget(rownames(xdf), eBBacc2sym, ifnotfound=rownames(xdf)))))
+            sym <- sapply(sym, function(x) unlist(strsplit(x, split=';'))[1])
+            rownames(xdf) <- sym
+        }
+        useLevelplot_v1(xdf,scale=TRUE, pdf=FALSE)
+    }
+}
+
+# D031417: v1 returns the xdf data.frame, which for proteins can be used as parameter of useLevelplot_v1(), for RNA the rownames will be used
+# to restrict the transcript data.frame
+clustHeatSubcluster_v1 <- function(df, colclust, nclust=7, protein=NULL, main='', filename='levelplot', qual='Protein', scale=TRUE, pdf=FALSE) {
+    # purpose: select cluster that contains protein
+    # colclust: object returned from hclust(), interested only in protein clusters not sample clusters
+    # nclust: total number of clusters
+    # protein: a protein accession
+    tosym <- FALSE
+    xdf <- df
+    y <- stats::cutree(colclust, k=nclust)
+    clust <- as.integer(y[names(y) == protein])
+    prots <- names(y[y==clust])
+    sz <- length(prots)
+    if (sz >= 70) {
+        for (n in seq(nclust+10, 100, by=10)) {
+            y <- stats::cutree(colclust, k=n)
+            clust <- as.integer(y[names(y) == protein])
+            prots <- names(y[y==clust])
+            if (length(prots) <= 70) {
+                xdf <- xdf[rownames(xdf) %in% prots,]
+                #write.table(xdf, file=paste('TempData', paste('cluster', 'with', 'protein', protein, sep='_'), sep='/'), quote=FALSE, sep='\t')
+             
+                if (tosym) {
+                    sym <- unlist(mget(rownames(xdf), eacc2sym, ifnotfound=unlist(mget(rownames(xdf), eBBacc2sym, ifnotfound=rownames(xdf)))))
+                    sym <- sapply(sym, function(x) unlist(strsplit(x, split=';'))[1])
+                    rownames(xdf) <- sym
+                }
+                #useLevelplot_v1(xdf,scale=TRUE, pdf=FALSE)
+                return(xdf)
+            }
+        }
+    } else {
+        xdf <- xdf[rownames(xdf) %in% prots,]
+        
+        if (tosym) {
+            sym <- unlist(mget(rownames(xdf), eacc2sym, ifnotfound=unlist(mget(rownames(xdf), eBBacc2sym, ifnotfound=rownames(xdf)))))
+            sym <- sapply(sym, function(x) unlist(strsplit(x, split=';'))[1])
+            rownames(xdf) <- sym
+        }
+        #useLevelplot_v1(xdf,scale=TRUE, pdf=FALSE)
+        return(xdf)
+    }
+}
+
+@ 
+% D22317
+% D031417
+<<label=extractanalyseclusters, echo=FALSE, eval=FALSE>>=
+##sym <- unlist(mget(rownames(m), eacc2sym, ifnotfound=rownames(m)))
+##sym <- ifelse(is.na(sym), '-', sym)
+##sym <- replReplacmnt(sym)
+##rownames(df) <- sym
+
+# data
+f.m <- fit$coef
+f.df <- as.data.frame(f.m)
+colnames(f.df) <- c('S0c', 'S1c', 'S2c', 'S3c', 'S4c', 'S5c')
+
+# scaling
+sf.df <- scale(f.df)
+tsf.df <- t(sf.df)
+    
+# clustering
+dd.row <- as.dendrogram(hclust(stats::dist(tsf.df)))
+col.hc <- hclust(stats::dist(sf.df))
+dd.col <- as.dendrogram(col.hc)
+
+#xdf <- clustHeatSubcluster_v1(clobjlst.P()[['fdf']], clobjlst.P()[['chc']], nclust=50, prot=selclustprot.id())
+xdf <- clustHeatSubcluster_v1(f.df, col.hc, nclust=50, prot='V9HW44')
+
+
+@ 
+
+pdf('Pdf/heatmapAllProts.pdf')
+useLevelplot_v2(tsf.df, dd.col)
+dev.off()
+
+clustHeatSubcluster(f.df, col.hc, nclust=50, prot='B2R6T2')
+
+@ 
+
+
+\end{document}

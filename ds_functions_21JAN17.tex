@@ -165,7 +165,7 @@
 +             protcoordl[[prot]] <- c(as.numeric(hkvals[prot]), 0, as.numeric(hkvals[prot]), f(as.numeric(hkvals[prot])))
 +         }
 +         
-+         main <- unlist(strsplit(ch, split='_'))[2]
++         main <- ''#unlist(strsplit(ch, split='_'))[2]
 +         plot(f, main=main, xlab='Protein Expression (Abundance)', ylab='Cumulative Expression', col.main='orange') # turquoise
 +         for (nm in names(protcoordl)) {
 +             points(list(x=c(protcoordl[[nm]][1]), y=c(protcoordl[[nm]][4])), col='blue', pch=20)
@@ -173,6 +173,153 @@
 +             #title(paste('Sample', spl), outer=TRUE, col.main='lightgreen', cex.main=1.5)
 +         }
 +     }
++ }
+> # D031717: same as v2 but using fit$coef instead of mss
+> plotECDF_v3 <- function(hdf, df, stage) {
++     ldvals <- df[,grep(stage, colnames(df))]
++     f <- ecdf(ldvals)
++         
++     clm <- which(colnames(hdf)==stage)
++     hkvals <- hdf[, clm]
++     names(hkvals) <- rownames(hdf)
++     hkvals <<- hkvals[!is.na(hkvals)]
++     p <- f(as.numeric(hkvals))
++            
++     protcoordl <- list()
++     for (prot in names(hkvals)) {
++         protcoordl[[prot]] <- c(as.numeric(hkvals[prot]), 0, as.numeric(hkvals[prot]), f(as.numeric(hkvals[prot])))
++     }
++         
++     main <- stage
++     plot(f, main=main, xlab='Protein Expression (Abundance)', ylab='Cumulative Expression', col.main='orange') # turquoise
++     names(protcoordl) <- unlist(mget(names(protcoordl), eacc2sym, ifnotfound=unlist(mget(names(protcoordl), eBBacc2sym, ifnotfound=names(protcoordl)))))
++     counter <- 1
++     for (nm in names(protcoordl)) {
++         points(list(x=c(protcoordl[[nm]][1]), y=c(protcoordl[[nm]][4])), col='blue', pch=20)
++         #jcoords <- jitter(protcoordl[[nm]][3:4], factor=1, amount=0.08)
++         if (counter %% 2 != 0) {
++             text(x=protcoordl[[nm]][1], y=protcoordl[[nm]][4], labels=nm, col='red', cex=0.6, adj=c(0,0))
++         } else {
++             #text(x=protcoordl[[nm]][1]-0.7*length(nm), y=protcoordl[[nm]][4], labels=nm, col='red', cex=0.6, adj=c(0.5,0))
++             text(x=protcoordl[[nm]][1], y=protcoordl[[nm]][4], labels=nm, col='red', cex=0.6, adj=c(1, 0.5))
++         }
++         counter <- counter + 1
++         }
++ }
+> # D031717: using ggplot2 with ggrepel
+> plotECDF_v4 <- function(hdf, df, stage) {
++     ldvals <- df[,grep(stage, colnames(df))]
++     f <- ecdf(ldvals)
++ 
++     clm <- which(colnames(hdf)==stage)
++     hkvals <- hdf[, clm]
++     names(hkvals) <- rownames(hdf)
++     hkvals <- hkvals[!is.na(hkvals)]
++     p <- f(as.numeric(hkvals))
++            
++     protcoordl <- list()
++     for (prot in names(hkvals)) {
++         protcoordl[[prot]] <- c(as.numeric(hkvals[prot]), 0, as.numeric(hkvals[prot]), f(as.numeric(hkvals[prot])))
++     }
++     names(protcoordl) <- unlist(mget(names(protcoordl), eacc2sym, ifnotfound=unlist(mget(names(protcoordl), eBBacc2sym, ifnotfound=names(protcoordl)))))
++     
++     protcoordl.df <- as.data.frame(t(as.data.frame(protcoordl)))
++     # need only abundances and percentiles to reduce crowding of labels
++     protcoordl.df <- protcoordl.df[,c(1, 4)]
++     colnames(protcoordl.df) <- c('Abundance', 'Percentile')
++     
++     g <- ggplot(df, aes_string(stage)) + stat_ecdf(geom='step')
++     g <- g + geom_point(data=protcoordl.df, aes(x=Abundance, y=Percentile), color='red')
++     g <- g + geom_text_repel(data=protcoordl.df, aes(x=Abundance, y=Percentile, label=rownames(protcoordl.df)), size=4, color='blue')
++     g <- g + ggtitle(stage) + labs(x='Protein Expression(Abundance',  y='Percentile')
++     g <- g + theme(plot.title=element_text(color='orange', size=15, face='bold', hjust=0.5))
++     plot(g)
++ }
+> # D032117: with a grouping factor
+> plotECDF_v5 <- function(df, stage, prot1, prot2) {
++     # now just 2 vectors of proteins, could be extended
++     # df: data frame with stage columns, S0c, S1c etc
++     # stage: S0c, S1c etc
++     require(RColorBrewer)
++     require(ggrepel)
++     ldvals <- df[,grep(stage, colnames(df))]
++     f <- ecdf(ldvals)
++     
++     clm <- which(colnames(df)==stage)
++     clm.df <- df[, clm, drop=FALSE]
++     
++     p1.df <-  clm.df[rownames(clm.df) %in% prot1,, drop=FALSE]
++     p1.df <- data.frame(p1.df, Percentile=f(as.numeric(unlist(c(p1.df)))), Group='Signifiant')
++     p2.df <- clm.df[rownames(clm.df) %in% prot2,, drop=FALSE]
++     p2.df <- data.frame(p2.df, Percentile=f(as.numeric(unlist(c(p2.df)))), Group='Markers')
++     duprows <- rownames(p2.df) %in% rownames(p1.df)
++     p.df <- rbind(p1.df, p2.df[!duprows,])
++     colnames(p.df) <- c('Abundance', 'Percentile', 'Group')
++     rownames(p.df) <- unlist(mget(rownames(p.df), eacc2sym, ifnotfound=unlist(mget(rownames(p.df), eBBacc2sym, ifnotfound=rownames(p.df)))))
++ 
++     # colors (from stackoverflow)
++     myColors <- brewer.pal(5,"Set1")
++     names(myColors) <- levels(p.df$Group)
++     colScale <- scale_colour_manual(name = "Group",values = myColors)
++     colScale <- scale_colour_manual(values = c("dark green", "blue"))
++     
++     g <- ggplot(df, aes_string(stage)) + stat_ecdf(geom='step')
++     g <- g + geom_point(data=p.df, aes(x=Abundance, y=Percentile), color='red')
++     g <- g + geom_text_repel(data=p.df, aes(x=Abundance, y=Percentile, label=rownames(p.df), color=factor(Group)), size=4)
++     g <- g + ggtitle(stage) + labs(x='Protein Expression (Abundance)',  y='Percentile')
++     g <- g + theme(plot.title=element_text(color='orange', size=15, face='bold', hjust=0.5), legend.position='none')
++     g <- g + colScale
++     plot(g)
++ }
+> # D032017: adding another parameter for marker data
+> plotECDF_vX <- function(hdf, protlst, df, stage) {
++     ldvals <- df[,grep(stage, colnames(df))]
++     f <- ecdf(ldvals)
++     
++     dfc <- which(colnames(df) == stage)
++     xvls <- df[rownames(df) %in% protlst[[stage]], dfc]
++     names(xvls) <- protlst[[stage]][protlst[[stage]] %in% rownames(df)]
++     xvls <- xvls[!is.na(xvls)]
++     p <- f(as.numeric(xvls))
++ 
++     markercoordl <- list()
++     for (prot in names(xvls)) {
++         markercoordl[[prot]] <- c(as.numeric(xvls[prot]), 0, as.numeric(xvls[prot]), f(as.numeric(xvls[prot])))
++     }
++     names(markercoordl) <- unlist(mget(names(markercoordl), eacc2sym, ifnotfound=unlist(mget(names(markercoordl), eBBacc2sym, ifnotfound=names(markercoordl)))))
++     markercoordl.df <- as.data.frame(t(as.data.frame(markercoordl)))
++     # abundances and percentiles
++     markercoordl.df <- markercoordl.df[,c(1, 4)]
++     colnames(markercoordl.df) <- c('Abundance', 'Percentile')
++ 
++     clm <- which(colnames(hdf) == stage)
++     hkvals <- hdf[, clm]
++     names(hkvals) <- rownames(hdf)
++     hkvals <- hkvals[!is.na(hkvals)]
++     p <- f(as.numeric(hkvals))
++            
++     hkcoordl <- list()
++     for (prot in names(hkvals)) {
++         hkcoordl[[prot]] <- c(as.numeric(hkvals[prot]), 0, as.numeric(hkvals[prot]), f(as.numeric(hkvals[prot])))
++     }
++     names(hkcoordl) <- unlist(mget(names(hkcoordl), eacc2sym, ifnotfound=unlist(mget(names(hkcoordl), eBBacc2sym, ifnotfound=names(hkcoordl)))))
++     hkcoordl.df <- as.data.frame(t(as.data.frame(hkcoordl)))
++     # abundances and percentiles
++     hkcoordl.df <- hkcoordl.df[,c(1, 4)]
++     colnames(hkcoordl.df) <- c('Abundance', 'Percentile')
++     
++     
++     g <- ggplot(df, aes_string(stage)) + stat_ecdf(geom='step')
++     
++     g <- g + geom_point(data=hkcoordl.df, aes(x=Abundance, y=Percentile), color='red')
++     g <- g + geom_text_repel(data=hkcoordl.df, aes(x=Abundance, y=Percentile, label=rownames(hkcoordl.df)), size=4, color='blue')
++     
++     g <- g + geom_point(data=markercoordl.df, aes(x=Abundance, y=Percentile), color='green')
++     g <- g + geom_text_repel(data=markercoordl.df, aes(x=Abundance, y=Percentile, label=rownames(markercoordl.df)), size=4, color='red')
++         
++     g <- g + ggtitle(stage) + labs(x='Protein Expression(Abundance',  y='Percentile')
++     g <- g + theme(plot.title=element_text(color='orange', size=15, face='bold', hjust=0.5))
++     plot(g)
 + }
 > # this is a copy from ds_analysis_A_27FEB17.Rnw:label=plotresults (D21517)
 > addAnnotTt <- function(tt) {

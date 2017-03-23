@@ -1,0 +1,51 @@
+\documentclass[a4paper]{article}
+\usepackage{Sweave}
+\begin{document}
+
+\title{}
+\author{}
+
+\maketitle
+
+%%========== INDIVIDUAL SAMPLES EXPLORATORY ============
+%% OBSOLETE, instead use function in label=ecdfplotshousekeepingmarkedD21317
+%% NOT FINISHED
+%% probably not what I want, use limma's plotMA
+
+%%========= ALL SAMPLES EXPLORATORY ======
+
+pdf(NULL)
+dev.control(displaylist="enable")
+mss.df <- as.data.frame(exprs(mss))
+hk.df <- mss.df[rownames(mss.df) %in% hk,]
+plotECDF(hk.df, mss.df)
+p1 <- recordPlot()
+invisible(dev.off())
+
+pdf(NULL)
+dev.control(displaylist="enable")
+plot(df$x, df$y)
+text(40, 0, "Random")
+text(60, 2, "Text")
+lines(stats::lowess(df$x, df$y))
+p1.base <- recordPlot()
+invisible(dev.off())
+
+# Display the saved plot
+grid::grid.newpage()
+p1.base
+
+x <- plotECDF(hk.df, mss.df)
+
+
+
+%%======= ALL SAMPLES DE ANALYSIS ============
+% use from ds_analysis_A_2FEB17.Rnw
+% use from ds_analysis_A_2FEB17.Rnw
+
+%% NOT COMPLETE
+
+%%====== DE ANALYSIS ALL 4 COMBINATIONS OF 3 SAMPLES ======
+\end{document}
+
+

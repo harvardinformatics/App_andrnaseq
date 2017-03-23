@@ -1,1 +1,7 @@
 *~
+*.results
+.DS_Store
+*.old
+TempData*
+RawData*
+*.pyc

@@ -1,0 +1,49 @@
+P02769	B.taurus ALB (serum albumin)
+F8VS36	obsolete
+A0A087WUR1	obsolete
+A0A087WV81	obsolete
+A0A0C4DGX5	obsolete
+A0A0C4DH83	obsolete
+A8MT02	obsolete
+P02754	B.taurus LGB (beta-lactoglobulin)
+P15497	B.taurus APOA1 (Apolipoprotein A-I)
+A0A0C4DH03	obsolete
+A0A087X0M1	obsolete
+A0A087WWW2	obsolete
+A0A0A0MT30	obsolete
+Q3MHN5	GC (Vitamin D-binding protein) B.taurus
+A0A0D9SG07	obsolete
+A0A0A6YYA2	obsolete
+A0A087X1L7	obsolete
+P81187	CFB (Complement factor B) B.taurus
+P02668	CSN3 (Kappa-casein) B.taurus
+A0A087WW14	obsolete
+A0A0J9YXX4	obsolete
+A0A087WV73	obsolete
+A0A087WXR2	obsolete
+A0A0A0MQV2	obsolete
+Q3T004	APCS (Serum amyloid P-component)
+A0A0J9YW57	obsolete
+P02663	CSN1S2 (Alpha-S2-casein)
+P02672	FGA (Fibrinogen alpha chain) B.taurus
+A0A087WW54	obsolete
+Q2UVX4	C3 (Complement C3) B.taurus
+B7ZBK4	obsolete
+A0A0A0MTG9	obsolete
+Q5R363	obsolete
+P00974	- (Pancreatic trypsin inhibitor) B.taurus
+F5GXK8	obsolete
+A0A087WWB6	obsolete
+O46375	TTR (Transthyretin) B.taurus
+Q29443	TF (Serotransferrin) B.taurus
+E9PEB9	deleted
+P02662	CSN1S1 (Alpha-S1-casein)
+A0A0C4DGV5	obsolete
+A0A096LNL8	obsolete
+A0A087WZV1	obsolete
+H0Y7L2	obsolete
+A0A087WYX5	obsolete
+A0A087WTV7	obsolete
+A0A0C4DGZ0	obsolete
+P00761	- (Trypsin) S.scrofa
+J3KR58	obsolete

@@ -1,0 +1,562 @@
+\documentclass[a4paper]{article}
+\usepackage{Sweave}
+\begin{document}
+
+\title{}
+\author{}
+
+\maketitle
+
+<<label=libraries, echo=FALSE, eval=TRUE>>=
+library(plyr)
+library(limma)
+
+quartz.options(width=5, height=5)
+options(editor="/usr/bin/vim")
+options(stringsAsFactors=FALSE)
+
+HOME <- Sys.getenv('HOME')
+USEPATH <- paste(HOME, 'MeltonProteomics', sep='/')
+UP1PATH <- HOME
+
+SERVER <- '/srv/shiny-server/DimaApp'
+SERVERPROT <- '/srv/shiny-server/DimaApp/MeltonProteomics'
+#SERVERPROT <- SERVER
+
+
+plotQQ_channels<- function(set, transformed=TRUE) {
+    # set: a MSnSet object, eg,set227
+    # transformed: boolean, if TRUE then take the asinh() of abundances
+    m <- exprs(set)
+    for (i in seq(ncol(m))) {
+        if (transformed){
+            print(qqnorm(asinh(exprs(set)[,i]), main=colnames(exprs(set))[i], cex=0.7))
+            print(qqline(asinh(exprs(set)[,i]), col='grey'))
+        } else {
+            print(qqnorm(exprs(set)[,i], main=colnames(exprs(set))[i], cex=0.7))
+            print(qqline(exprs(set)[,i], col='grey'))
+        }
+    }
+}
+
+# replace '-' each time it is found with another string
+replReplacmnt <- function(cv) {
+    # replenish replacement
+    # cv: a character vector
+    n <- 0
+    for (i in seq(length(cv))) {
+        if (cv[i] == '-') {
+            n <- n + 1
+            cv[i] <- paste('NoSymbol', n, sep='_')
+        }
+    }
+    return(cv)
+}
+
+testsym <- NULL
+pplotDE <- function(lmf, tt, contrast, annot, aspdf) {
+    # lmf: output from lmFit()
+    # tt: output from topTable() with fixed contrast
+    # contrast: eg., T5vsT4 for title
+    # annot: either 'gene' or 'acc' (or some other string)
+    # aspdf: boolean, TRUE if output to pdf
+    m <- lmf$coefficient
+    df <- as.data.frame(m)
+    df <- df[rownames(df) %in% rownames(tt), ]
+    genesym <- unlist(mget(rownames(df), eacc2sym, ifnotfound=unlist(mget(rownames(df), eBBacc2sym, ifnotfound=rownames(df)))))
+    #genesym <- replReplacmnt(genesym)
+    testsym <<- genesym
+    if (annot=='gene') rownames(df) <- genesym
+    
+    if (aspdf) {
+        pdf(paste(paste(paste(SERVER, 'Pres/Slides_27JAN17', sep='/'), paste('deProteins', contrast, sep='_'), sep='/'), 'pdf', sep='.'))
+        #quartz('',5.5, 4.5)
+        gplot_parallel(df, df, contrast)
+        dev.off()
+    } else {
+        quartz('',5.5, 4.5)
+        gplot_parallel(df, df, contrast)
+    }
+}
+
+#Sweave(paste(SERVERPROT, 'ds_resources_21JAN17.Rnw', sep='/'))
+#Sweave(paste(SERVERPROT, 'ds_functions_21JAN17.Rnw', sep='/'))
+
+@ 
+%%========== INDIVIDUAL SAMPLES EXPLORATORY ============
+<<label=plotdistindividualspls, echo=FALSE, eval=FALSE>>=
+#pdf(paste('Pdf/set227', 'dist', '.pdf', sep=''))
+for (sple in c(set227, set238, set239, set243)) {
+    par.orig <- par(mfrow=c(2,3))
+    plotQQ_channels(sple, FALSE)
+    par(par.orig)
+}
+#dev.off()
+
+@ 
+%% OBSOLETE, instead use function in label=ecdfplotshousekeepingmarkedD21317
+<<label=ecdfnormalplotall, echo=FALSE, eval=FALSE>>=
+# for all samples, THIS WORKS APPROXIMATELY, plots stray lines
+par.orig <- par(mfrow=c(2,3))
+spls <- c('227', '238', '239', '243')
+
+splst <- list()
+for (spl in spls) {
+  splst[[spl]] <- get(grep(paste('^dat', spl, '.df', sep=''), ls(), value=TRUE))
+}
+splst <- lapply(splst, log10)
+
+hklst <- list() # housekeeping
+for (spl in spls) {
+    hklst[[spl]] <- get(grep(paste('^hk', spl, '.df', sep=''), ls(), value=TRUE))
+}
+hklst <- lapply(hklst, log10)
+
+pdf(paste(SERVER, 'Pres/Slides_27JAN17/qqp227HousekeepingGenesMarked.pdf', sep='/'))
+par.orig <- par(mfrow=c(2,3))
+for (i in seq(length(splst))) {
+    ld <- stack(splst[[i]])
+    
+    for (ch in as.character(unique(ld$ind))) {
+        ldvals <- ld[ld$ind == ch,]$values
+        f <- ecdf(ldvals)
+        
+        clm <- which(colnames(hklst[[i]])==ch)
+        hkvals <- hklst[[i]][,clm]
+        hkvals <- hkvals[!is.na(hkvals)]
+        p <- f(hkvals)
+
+        b <- NULL
+        for (x in p) b <- c(b,c(0, x))
+        m <- matrix(c(rep(hkvals, each=2), b), ncol=2, byrow=FALSE)
+    
+        if(i == 1) {
+            plot(f, main=ch)
+            lines(m[,1], m[,2], col='blue')
+            #text(hk227.df$S227_126, jitter(p, factor=1, amount=0.05), labels=rownames(hk227.df), col='blue', cex=0.5, adj=c(0,0))
+        }
+
+    }
+}
+dev.off()
+par(par.orig)
+
+@ 
+%% NOT FINISHED
+<<label=varvsmean, echo=FALSE, eval=FALSE>>=
+y <- NULL
+x <- NULL
+for (s in splelist) {
+    y <- c(y, apply(log10(s), 2, sd))
+    x <- c(x, apply(log10(s), 2, mean))
+}
+
+plot(x, y, pch=20, col='blue')
+
+@ 
+%% probably not what I want, use limma's plotMA
+<<label=maplots, echo=FALSE, eval=FALSE>>=
+MAplot(set238, cex = .7, na.rm=TRUE)#, col = cls, pch = pch)#, show.statistics = FALSE)
+
+@ 
+<<label=hist, echo=FALSE, eval=FALSE>>=
+#plot(density(dat238.df[,1], na.rm=TRUE))
+hist(ndat238.df[, 1], breaks=100)
+
+@ 
+<<label=boxplots, echo=FALSE, eval=FALSE>>=
+# with normalized data
+longndat238.df <- stack(ndat238.df)
+longndat238.df <- cbind(longndat238.df, spl=rep('S238', nrow(longndat238.df)))
+longndat238.df$ind <- sub('S.*_', '', as.character(longndat238.df$ind))
+
+longndat239.df <- stack(ndat239.df)
+longndat239.df <- cbind(longndat239.df, spl=rep('S239', nrow(longndat239.df)))
+longndat239.df$ind <- sub('S.*_', '', as.character(longndat239.df$ind))
+
+longndat243.df <- stack(ndat243.df)
+longndat243.df <- cbind(longndat243.df, spl=rep('S243', nrow(longndat243.df)))
+longndat243.df$ind <- sub('S.*_', '', as.character(longndat243.df$ind))
+
+longndat.df <- rbind(longndat238.df, longndat239.df, longndat243.df)
+
+boxplot(values ~ spl, data=longndat.df)
+
+@ 
+
+%%========= ALL SAMPLES EXPLORATORY ======
+
+<<label=houskeepingnormandtransD2217, echo=FALSE, eval=FALSE>>= # ****** turn off D21317
+gplot_hkprotsV1<- function(hdf, df, lbl) {
+    # hdf: data.frame of housekeeping proteins
+    # df: data.frame sample data
+    # lbl: part of main of plot, a string, eg., sample name etc
+    xhdf <- namerows(hdf, col.name='Housekeeping')
+    xhdf <- melt(xhdf, id.var = 'Housekeeping')
+    colnames(xhdf) <- c('Housekeeping', 'Samples', 'Abundance')
+
+    xmin <- min(df, na.rm=TRUE)
+    xmax <- max(df, na.rm=TRUE)
+    #s <- deparse(substitute(hdf))
+    #sl <- unlist(strsplit(s, '\\.'))[1]
+    #sl <- unlist(strsplit(sl, 'k'))[2]
+
+    pg <- ggplot(xhdf, aes(Samples, Abundance, group=Housekeeping, color=Housekeeping)) + geom_line()
+    pg <- pg + theme(axis.text.x = element_text(angle = 90, hjust = 1), plot.title=element_text(color='blue', hjust=0.5))
+    pg <- pg + scale_y_continuous(limits = c(xmin, xmax ))
+    pg <- pg + ggtitle(paste('Houskeeping', 'Proteins', paste('S', lbl, sep=''), sep=' '))
+    print(pg)
+}
+
+plotHousekeeping <- function(hdf, df) {
+    ## uses gplot_hkprots
+    # replace acc with symbols
+    sym <- unlist(mget(rownames(hdf), eacc2sym, ifnotfound=unlist(mget(rownames(hdf), eBBacc2sym, ifnotfound=rownames(hdf)))))
+    #sym <- replReplacmnt(sym)
+    rownames(hdf) <- sym
+    
+    cnames <- as.character(colnames(hdf))
+    xl <- strsplit(cnames, split='_')
+    xl <- lapply(xl, function(x) x[1])
+    x <- sub('S', '', unlist(xl))
+    spls <- unique(x)
+
+    for (spl in spls) {
+        ixs <- grep(spl, colnames(df))
+        fn <- paste(paste('parallelpHousekeeping', spl, sep=''), 'pdf', sep='.')
+        pdf(paste(paste(SERVER, 'Pres/Slides_27JAN17', sep='/'), fn, sep='/'))
+        gplot_hkprotsV1(hdf[, ixs], df[, ixs], spl)
+        dev.off()
+
+    }
+}
+
+mss.df <- as.data.frame(exprs(mss))
+hk.df <- mss.df[rownames(mss.df) %in% hk,]
+
+plotHousekeeping(hk.df, mss.df)
+
+@ 
+<<label=ecdfplotshousekeepingmarkedD21317, echo=FALSE, eval=TRUE>>=
+## version zero, plotECDF(), moved to ds_functions_21JAN17.Rnw
+plotECDF_v1<- function(hdf, df, spl) {
+    ld <- stack(df)
+
+    pdf(NULL)
+    dev.control(displaylist="enable")
+    par.orig <- par(mfrow = c(2, 3), oma=c(0, 0, 3, 0))
+    for (ch in as.character(unique(ld$ind))) {
+        ldvals <- ld[ld$ind == ch,]$values
+        f <- ecdf(ldvals)
+        
+        clm <- which(colnames(hdf)==ch)
+        hkvals <- hdf[, clm]
+        names(hkvals) <- rownames(hdf)
+        hkvals <<- hkvals[!is.na(hkvals)]
+        p <- f(as.numeric(hkvals))
+           
+        protcoordl <- list()
+        for (prot in names(hkvals)) {
+            protcoordl[[prot]] <- c(as.numeric(hkvals[prot]), 0, as.numeric(hkvals[prot]), f(as.numeric(hkvals[prot])))
+        }
+        
+        main <- unlist(strsplit(ch, split='_'))[2]
+        plot(f, main=main, xlab='Protein Expression (Abundance)', ylab='Cumulative Expression', col.main='orange') # turquoise
+        for (nm in names(protcoordl)) {
+            lines(list(x=c(protcoordl[[nm]][1], protcoordl[[nm]][3]), y=c(protcoordl[[nm]][2], protcoordl[[nm]][4])), col='blue')
+            jcoords <- jitter(protcoordl[[nm]][3:4], factor=1, amount=0.08)
+            text(x=jcoords[1], y=jcoords[2], labels=nm, col='blue', cex=0.7, adj=c(0,0))
+            title(paste('Sample', spl), outer=TRUE, col.main='lightgreen', cex.main=1.5)
+        }
+    }
+    par(par.orig)
+    plt <- recordPlot()
+    invisible(dev.off())
+
+    return(plt)
+}
+
+multiEcdfPlot <- function(sl, ml) {
+    ## a wrapper for plotECDF()
+    # see multiBarPlot() for sl and ml
+    # sl is the list of expression data frames for the list of proteins
+    pl <- NULL
+    for (nm in names(sl)) {
+        sym <- unlist(mget(rownames(sl[[nm]]), eacc2sym, ifnotfound=unlist(mget(rownames(sl[[nm]]), eBBacc2sym, ifnotfound=rownames(sl[[nm]])))))
+        #sym <- replReplacmnt(sym)
+        rownames(sl[[nm]]) <- sym
+        
+        xnm <- sub('s', '', nm)
+        df <- as.data.frame(exprs(ml[[nm]]))
+        pl[[nm]] <- plotECDF_v1(sl[[nm]], df, xnm)
+    }
+    return(pl)
+}
+    
+@ 
+pdf(NULL)
+dev.control(displaylist="enable")
+mss.df <- as.data.frame(exprs(mss))
+hk.df <- mss.df[rownames(mss.df) %in% hk,]
+plotECDF(hk.df, mss.df)
+p1 <- recordPlot()
+invisible(dev.off())
+
+pdf(NULL)
+dev.control(displaylist="enable")
+plot(df$x, df$y)
+text(40, 0, "Random")
+text(60, 2, "Text")
+lines(stats::lowess(df$x, df$y))
+p1.base <- recordPlot()
+invisible(dev.off())
+
+# Display the saved plot
+grid::grid.newpage()
+p1.base
+
+x <- plotECDF(hk.df, mss.df)
+
+
+@
+
+%%======= ALL SAMPLES DE ANALYSIS ============
+% use from ds_analysis_A_2FEB17.Rnw
+<<label=limma, echo=FALSE, eval=FALSE>>= # ****** turn off D21317
+design <- model.matrix(~ 0+factor(rep(seq(0, 5), 4)))
+colnames(design) <- c('t1', 't2', 't3', 't4', 't5', 't6')
+fit <- lmFit(mses, design)
+
+# added D22217
+savefitobj <- FALSE
+if (savefitobj) {
+    sfile <- paste('TempWGCN', 'fitcoef', sep='/')
+    fitcoef <- fit$coef
+    save(fitcoef, file=sfile)
+}
+
+contrast.matrix <- makeContrasts(t2 - t1, t3 - t2, t4 - t3, t5 - t4, t6 - t5, levels=design)
+fit2 <- contrasts.fit(fit, contrast.matrix)
+fit2 <- eBayes(fit2)
+
+
+@ 
+% use from ds_analysis_A_2FEB17.Rnw
+<<label=toptables, echo=FALSE, eval=FALSE>>=
+c1 <- topTable(fit2, coef=1, adjust='BH', number=24)
+c1map <- unlist(mget(rownames(c1), eacc2sym, ifnotfound=unlist(mget(rownames(c1), eBBacc2sym, ifnotfound=rownames(c1)))))
+c2 <- topTable(fit2, coef=2, adjust='BH', number=35)
+c2map <- unlist(mget(rownames(c2), eacc2sym, ifnotfound=unlist(mget(rownames(c2), eBBacc2sym, ifnotfound=rownames(c2)))))
+c3 <- topTable(fit2, coef=3, adjust='BH', number=2)
+c3map <- unlist(mget(rownames(c3), eacc2sym, ifnotfound=unlist(mget(rownames(c3), eBBacc2sym, ifnotfound=rownames(c3)))))
+c4 <- topTable(fit2, coef=4, adjust='BH', number=11)
+c4map <- unlist(mget(rownames(c4), eacc2sym, ifnotfound=unlist(mget(rownames(c4), eBBacc2sym, ifnotfound=rownames(c4)))))
+c5 <- topTable(fit2, coef=5, adjust='BH', number=30)
+c5map <- unlist(mget(rownames(c5), eacc2sym, ifnotfound=unlist(mget(rownames(c5), eBBacc2sym, ifnotfound=rownames(c5)))))
+
+@ 
+
+<<label=limmamorecontrastsD22117, echo=FALSE, eval=FALSE>>=
+timecourse <- c('t1', 't2', 't3', 't4', 't5', 't6')
+x <- combn(timecourse, 2)
+
+contrast.matrix <- makeContrasts(t2 - t1, t3 - t2, t4 - t3, t5 - t4, t6 - t5, t4 - t1, t4 - t2, levels=design)
+fit2 <- contrasts.fit(fit, contrast.matrix)
+fit2 <- eBayes(fit2)
+
+cc1 <- topTable(fit2, coef=1, adjust='BH', number=24)#; c1map <- unlist(mget(rownames(c1), eacc2sym, ifnotfound=NA))
+cc2 <- topTable(fit2, coef=2, adjust='BH', number=35)#; c2map <- unlist(mget(rownames(c2), eacc2sym, ifnotfound=NA))
+cc3 <- topTable(fit2, coef=3, adjust='BH', number=2)#; c3map <- unlist(mget(rownames(c3), eacc2sym, ifnotfound=NA))
+cc4 <- topTable(fit2, coef=4, adjust='BH', number=11)#; c4map <- unlist(mget(rownames(c4), eacc2sym, ifnotfound=NA))
+cc5 <- topTable(fit2, coef=5, adjust='BH', number=30)#; c5map <- unlist(mget(rownames(c5), eacc2sym, ifnotfound=NA))
+cc6 <- topTable(fit2, coef=6, adjust='BH', number=Inf)#; c5map <- unlist(mget(rownames(c5), eacc2sym, ifnotfound=NA)) #147
+c7 <- topTable(fit2, coef=7, adjust='BH', number=Inf)#; c5map <- unlist(mget(rownames(c5), eacc2sym, ifnotfound=NA)) #52
+
+
+@ 
+<<label=devennD21417, echo=FALSE, eval=FALSE>>=
+res <- decideTests(fit2)
+
+pdf(paste(SERVER, 'Pres/Slides_27JAN17/venn_DEproteins.pdf', sep='/'))
+vennDiagram(res)
+dev.off()
+
+@ 
+<<label=plotresults, echo=FALSE, eval=FALSE>>= # ****** turn off D21317
+addAnnotFit <- function(lmf, tt) {
+    # lmf: output from lmFit()
+    # tt: output from topTable() with fixed contrast
+    # contrast: eg., T5vsT4 for title
+    # annot: either 'gene' or 'acc' (or some other string)
+    m <- lmf$coefficient
+    df <- as.data.frame(m)
+    df <- df[rownames(df) %in% rownames(tt), ]
+    pname <- unlist(mget(rownames(df), eacc2name, ifnotfound=unlist(mget(rownames(df), eBBacc2name, ifnotfound=rownames(df)))))
+    df <- data.frame(Name=pname,df)
+    genesym <- unlist(mget(rownames(df), eacc2sym, ifnotfound=unlist(mget(rownames(df), eBBacc2sym, ifnotfound=rownames(df)))))
+    df <- data.frame(Symbol=genesym, df)
+}
+
+xf <- addAnnotFit(fit, c1)
+
+useFunctionFile <- TRUE
+if (!useFunctionFile) {
+    addAnnotTt <- function(tt) {
+        # tt: output from topTable() with fixed contrast, eg., c1
+        # contrast: eg., T5vsT4 for title
+        # annot: either 'gene' or 'acc' (or some other string)
+        pname <- unlist(mget(rownames(tt), eacc2name, ifnotfound=unlist(mget(rownames(tt), eBBacc2name, ifnotfound=rownames(tt)))))
+        df <- data.frame(Name=pname,tt)
+        genesym <- unlist(mget(rownames(tt), eacc2sym, ifnotfound=unlist(mget(rownames(tt), eBBacc2sym, ifnotfound=rownames(tt)))))
+        df <- data.frame(Symbol=genesym, df)
+        df$logFC <- ifelse(df$logFC < 0, -2^(-df$logFC), 2^df$logFC)
+        df <- df[, c(1:3, 7)]
+        colnames(df) <- c('Symbol', 'Name', 'FC', 'pval')
+        return(df)
+    }
+}
+
+c1Table <- addAnnotTt(c1)
+c2Table <- addAnnotTt(c2)
+c3Table <- addAnnotTt(c3)
+c4Table <- addAnnotTt(c4)
+c5Table <- addAnnotTt(c5)
+
+write.csv(c1Table, file=paste(SERVER, 'Pres/Slides_Dima/c1Table.csv', sep='/'), quote=FALSE)
+write.csv(c2Table, file=paste(SERVER, 'Pres/Slides_Dima/c2Table.csv', sep='/'), quote=FALSE)
+write.csv(c3Table, file=paste(SERVER, 'Pres/Slides_Dima/c3Table.csv', sep='/'), quote=FALSE)
+write.csv(c4Table, file=paste(SERVER, 'Pres/Slides_Dima/c4Table.csv', sep='/'), quote=FALSE)
+write.csv(c5Table, file=paste(SERVER, 'Pres/Slides_Dima/c5Table.csv', sep='/'), quote=FALSE)
+
+testsym <- NULL
+pplotDE <- function(lmf, tt, contrast, annot, aspdf) {
+    # lmf: output from lmFit()
+    # tt: output from topTable() with fixed contrast
+    # contrast: eg., T5vsT4 for title
+    # annot: either 'gene' or 'acc' (or some other string)
+    # aspdf: boolean, TRUE if output to pdf
+    m <- lmf$coefficient
+    df <- as.data.frame(m)
+    df <- df[rownames(df) %in% rownames(tt), ]
+    genesym <- unlist(mget(rownames(df), eacc2sym, ifnotfound=unlist(mget(rownames(df), eBBacc2sym, ifnotfound=rownames(df)))))
+    #genesym <- replReplacmnt(genesym)
+    testsym <<- genesym
+    if (annot=='gene') rownames(df) <- genesym
+    
+    if (aspdf) {
+        pdf(paste(paste(paste(SERVER, 'Pres/Slides_27JAN17', sep='/'), paste('deProteins', contrast, sep='_'), sep='/'), 'pdf', sep='.'))
+        #quartz('',5.5, 4.5)
+        gplot_parallel(df, df, contrast)
+        dev.off()
+    } else {
+        quartz('',5.5, 4.5)
+        gplot_parallel(df, df, contrast)
+    }
+}
+
+
+pplotDE(fit, c1, 'T2vsT1', annot='gene', TRUE) # annot: gene, any other
+pplotDE(fit, c2, 'T3vsT2', annot='gene', TRUE)
+pplotDE(fit, c3, 'T4vsT3', annot='gene', TRUE)
+pplotDE(fit, c4, 'T5vsT4', annot='gene', TRUE)
+pplotDE(fit, c5, 'T6vsT5', annot='gene', TRUE)
+
+@ 
+%% NOT COMPLETE
+<<label=maplot, echo=FALSE, eval=FALSE>>=
+plotMA(mses)
+
+
+@ 
+
+%%====== DE ANALYSIS ALL 4 COMBINATIONS OF 3 SAMPLES ======
+<<label=limmaanalfct, echo=FALSE, eval=FALSE>>=
+require(limma)
+
+# design is always the same
+# there are now only 3 samples, so 3 * rep()!
+
+<<label=comparecontrastresults, echo=FALSE, eval=FALSE>>=
+design <- model.matrix(~ 0+factor(rep(seq(0, 5), 3)))
+colnames(design) <- c('t1', 't2', 't3', 't4', 't5', 't6')
+
+analWithLimma <- function(eset, dsgn, ct, pval, venn=FALSE) {
+    ## fit and Bayes
+    ## returns top table data.frame
+    ## params:
+    # eset, that's clear
+    # dsgn, design
+    # ct, contrast an integer from 1 to 5
+    # pval, cutoff pvalue
+    # 1: T2 vs T1 etc
+    # venn: boolean, TRUE if Venn diagram should be plotted
+    fit <- lmFit(eset, dsgn)
+    contrast.matrix <- makeContrasts(t2 - t1, t3 - t2, t4 - t3, t5 - t4, t6 - t5, levels=dsgn)
+    fit2 <- eBayes(fit2)
+    
+    if (venn) {
+        res <- decideTests(fit2)
+        vennDiagram(res)
+    }
+    
+    coef <- as.integer(ct)
+    pval <- as.numeric(pval)
+    tt <- topTable(fit2, coef=coef, number=Inf, adjust.method='BH', p.value=pval)
+    return(tt)
+}
+
+deProts <- function(eset, contrst) {
+    contrst <- as.integer(contrst)
+    tt <- analWithLimma(eset, design, contrst, 0.05)
+    return(tt)
+}
+
+# THIS HAS TO BE CLEANED UP
+alltt.lst <- list(c1, c2, c3, c5, c5)
+
+compareTt <- function(contrast) {
+    ## example use: compareTt(4)
+    ## returns what?
+    ## params:
+    # contrast is an integer, corresponding to number in c1, c2, etc
+    # ttall, see above 
+    contrast <- as.integer(contrast)
+    tt273839.df <- analWithLimma(mses273839, design, contrast, 0.05)
+    tt273843.df <- analWithLimma(mses273843, design, contrast, 0.05)
+    tt273943.df <- analWithLimma(mses273839, design, contrast, 0.05)
+    tt383943.df <- analWithLimma(mses273839, design, contrast, 0.05)
+   
+    tt.lst <- list(tt273839.df, tt273843.df, tt273943.df, tt383943.df)
+    x.lgic <- lapply(tt.lst, function(x, a) {
+        b <- length(setdiff(rownames(tt.lst[[i]]), rownames(a)))
+        b != 0
+    }, alltt.lst[[contrast]])
+    
+    return(any(unlist(x.lgic) != 0))
+}
+    
+compareTtV1 <- function(contrast) {
+    contrast <- as.integer(contrast)
+    tt273839.df <- analWithLimma(mses273839, design, contrast, 0.05)
+    tt273843.df <- analWithLimma(mses273843, design, contrast, 0.05)
+    tt273943.df <- analWithLimma(mses273839, design, contrast, 0.05)
+    tt383943.df <- analWithLimma(mses273839, design, contrast, 0.05)
+   
+    tt.lst <- list(tt273839.df, tt273843.df, tt273943.df, tt383943.df)
+
+    alll <- NULL
+    for (i in 1:length(tt.lst)) {
+        a <- length(setdiff(rownames(tt.lst[[i]]), rownames(alltt.lst[[contrast]])))
+        if (a != 0) {
+            message(i)
+        }
+        alll <- c(alll, a)
+    }
+    return(any(alll != 0))
+}
+    
+
+@ 
+\end{document}
+
+

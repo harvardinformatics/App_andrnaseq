@@ -1,14 +1,18 @@
 library(shiny)
 
-mylibs <- Sys.getenv('J_LIBS')
-if (is.na(mylibs) || mylibs == '') {
-    mylibs <- '~/Dropbox/Harvard'
-}
+SERVER <- '/srv/shiny-server/DimaApp'
+SERVERPROT <- '/srv/shiny-server/DimaApp/MeltonProteomics'
+SERVERRNA <- '/srv/shiny-server/DimaApp/MeltonRNAseq'
 
-Sweave(file.path(mylibs,'MeltonProteomics','ds_functions_21JAN17.Rnw')
-Sweave(file.path(mylibs,'MeltonRNAseq','ds_rnaseqAnalysis_5MAR17.Rnw')
-Sweave(file.path(mylibs,'MeltonProteomics','ds_analysis_21JAN17.Rnw')
-Sweave(file.path(mylibs,'MeltonProteomics','ds_analysis_A_2FEB17.Rnw')
+
+Sweave(paste(SERVERPROT, 'ds_functions_21JAN17.Rnw', sep='/'))
+Sweave(paste(SERVERPROT, 'ds_resources_21JAN17.Rnw', sep='/'))
+Sweave(paste(SERVERPROT, 'ds_analysis_21JAN17.Rnw', sep='/'))
+Sweave(paste(SERVERPROT, 'ds_analysis_A_2FEB17.Rnw', sep='/'))
+Sweave(paste(SERVERRNA, 'ds_rnaseqFunctions_13MAR17.Rnw', sep='/'))
+Sweave(paste(SERVERRNA, 'ds_rnaseqAnalysis_5MAR17.Rnw', sep='/'))
+
+
 
 acclst <- list(s227=r227.df$Accession, s238=r238.df$Accession, s239=r239.df$Accession, s243=r243.df$Accession) # rows WITHOUT QUANTITATION REMOVED
 xl <-  makeSubsetExprMatrix(1, adat.lst) # adat.lst in resources:label=msnsetfromsubsets, EACH data.frame HAS ADDITIONAL FEATURES COLUMN (don't confuse with acclst)
@@ -81,11 +85,12 @@ ui <- fluidPage(
                                                                  column(5, plotOutput('selclustP', height='600px')),
                                                                  column(5, plotOutput('selclustR', height='600px')))),
                         tabPanel('ECDF Selection', value=8, fluidRow(
-                                                                column(8, plotOutput('ecdfspl1', width='600px', height='600px', hover=hoverOpts(id='plothover'))),
-                                                                column(4, verbatimTextOutput("hoverinfo")),
+                                                                column(8, plotOutput('ecdfspl1', width='600px', height='600px')),#, hover=hoverOpts(id='plothover'))),
+                                                                #column(4, verbatimTextOutput("hoverinfo")),
                                                                 column(8, plotOutput('ecdfspl2', width='600px', height='600px')),
                                                                 column(8, plotOutput('ecdfspl3', width='600px', height='600px')),
-                                                                column(8, plotOutput('ecdfspl4', width='600px',height='600px'))))
+                                                                column(8, plotOutput('ecdfspl4', width='600px', height='600px')),
+                                                                column(8, plotOutput('ecdfspl5', width='600px', height='600px'))))
                         )
         )
     )
@@ -338,7 +343,7 @@ server <- function(input, output) {
         sym <- unlist(mget(rownames(xdf), eacc2sym, ifnotfound=unlist(mget(rownames(xdf), eBBacc2sym, ifnotfound=rownames(xdf)))))
         sym <- sapply(sym, function(x) unlist(strsplit(x, split=';'))[1])
         rownames(xdf) <- sym
-        useLevelplot_v1(xdf, scale=TRUE, pdf=FALSE)
+        useLevelplot_v1(xdf, scale=TRUE, pdf=FALSE, main='Proteins')
     })
 
     output$selclustR <- renderPlot({
@@ -352,15 +357,30 @@ server <- function(input, output) {
         sym <- sapply(sym, function(x) unlist(strsplit(x, split=';'))[1])
         rownames(ydf) <- sym
 
-        useLevelplot_v1(ydf, scale=TRUE, pdf=FALSE)
+        useLevelplot_v1(ydf, scale=TRUE, pdf=FALSE, main='Transcripts')
     })
 
+    newfitdf <- reactive({
+        df <- as.data.frame(newfit$coef)
+        colnames(df) <- c('S0c', 'S1c', 'S2c', 'S3c', 'S4c', 'S5c')
+        return(df)
+    })
+    
+    ## ECDF Selection
     output$ecdfspl1 <- renderPlot({
-        plotECDF_v2(mostlysig.df, mss.df, 's227')
+        plotECDF_v5(newfitdf(), 'S1c', rownames(c1), markers)
     })
-
-    output$hoverinfo <- renderPrint({
-        str(input$plothover)
+    output$ecdfspl2 <- renderPlot({
+        plotECDF_v5(newfitdf(), 'S2c', rownames(c2), markers)
+    })
+    output$ecdfspl3 <- renderPlot({
+        plotECDF_v5(newfitdf(), 'S3c', rownames(c3), markers)
+    })
+    output$ecdfspl4 <- renderPlot({
+        plotECDF_v5(newfitdf(), 'S4c', rownames(c4), markers)
+    })
+    output$ecdfspl5 <- renderPlot({
+        plotECDF_v5(newfitdf(), 'S5c', rownames(c5), markers)
     })
     
     # for testing

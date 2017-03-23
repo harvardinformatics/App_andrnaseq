@@ -1,0 +1,186 @@
+\documentclass[a4paper]{article}
+\usepackage{Sweave}
+\begin{document}
+
+\title{}
+\author{}
+
+\maketitle
+
+<<label=libraries, echo=FALSE, eval=TRUE>>=
+library(ggplot2)
+library(gridExtra)
+
+options(stringsAsFactors=FALSE)
+
+@ 
+
+<<label=functions>>=
+require(reshape)
+
+cleanAndNormalize <- function(dge, clean=TRUE, norm=FALSE) {
+    # dge: an object of DGEList, e.g., dat.dge
+    # clean: boolean; TRUE: keep only with cpm > 1 in more than 10 samples
+    # norm: boolean; TRUE: normalize
+    if (clean & norm) {
+        cpm <- cpm(dge)
+        # THRESHOLD hard coded
+        keep <- rowSums(cpm > 1) > 10
+        
+        # normalize first
+        dge <- calcNormFactors(dge, method='TMM')
+        dge <- dge[keep,, keep.lib.sizes=FALSE]
+
+        return(dge)
+    }
+
+    if (clean) {
+        cpm <- cpm(dge)
+        keep <- rowSums(cpm > 1) > 10
+        
+        return(dge[keep,, keep.lib.sizes=FALSE])
+    }
+    
+    if (norm) {
+        dge <- calcNormFactors(dge, method='TMM')
+        
+        return(dge)
+    }
+        
+    return(dge)
+}
+
+genSubsetAbundMat_RNAseq <- function(vectacc, dgeobj, logtr) {
+    # generates data.frame count matrix given a listing of accession
+    # returns a list of the data frames
+    # vectofacc: listing of accessions
+    # dgeobj: an object of class DGEList (edgeR library); data neither normalized
+    # nor cleaned
+    cnobj <- cleanAndNormalize(dgeobj, clean=TRUE, norm=TRUE)
+        
+    df.lst <- list()
+    spls <- sapply(rownames(cnobj$samples), function(x) unlist(strsplit(x, split='_'))[1])
+    for (spl in as.character(spls)) {
+        x <- cnobj[cnobj$genes$Acc %in% vectacc,grep(spl,rownames(cnobj$samples))]
+
+        rownames(x$counts) <- x$genes$Symbol
+        #xcnt <- x$counts
+        
+        if (logtr) {
+            xcpm <- cpm(x, log=TRUE)
+        } else {
+            xcpm <- cpm(x)
+        }
+        
+        spl <- tolower(spl)
+        df.lst[[spl]] <- as.data.frame(xcpm)
+    }
+    
+    return(df.lst)
+}
+
+
+lattice_barchart <- function(df) {
+    xdf <- namerows(df, col.name='Protein')
+    xdf <- melt(xdf, id.var='Protein')
+    v <- stringr::str_split_fixed(xdf$variable, '_', 2)
+    xdf <- data.frame(xdf, v)
+    res <- barchart(value ~ X2|Protein, groups=X1, data=xdf, scales=list(x=list(rot=90)), par.settings=list(superpose.polygon=list(col='lightgreen')))
+    #barchart(value ~ X2|Protein+X1, data=ma, scales=list(x=list(rot=90)), par.settings=list(superpose.polygon=list(col='blue')))
+    return(res)
+}
+
+
+gplot_barplot_RNAseq <- function(df, type='Protein') {
+    ## parameters:
+    # df: data.frame sample data
+    # type: either 'Protein' or 'Transcript'
+    v <- stringr::str_split_fixed(colnames(df), '_', 2) # this line and next moved D21217
+    title <- paste(unique(v[,1]), type, sep=' ')
+    df <- modTMTsixplexLabelNames(df) # added D21217
+    
+    xdf <- namerows(df, col.name='Protein')
+    xdf <- melt(xdf, id.var = 'Protein')
+    colnames(xdf) <- c('Protein', 'Samples', 'Abundance')
+        
+    pg <- ggplot(xdf, aes(Samples, Abundance)) + geom_bar(stat='identity', fill='lightblue', alpha=1)
+    pg <- pg + labs(x='Development Stage', size=10)
+    pg <- pg + facet_grid(. ~ Protein) + ggtitle(title)
+    pg <- pg + theme(axis.text.x = element_text(angle=90, hjust=1), plot.title=element_text(color='blue', hjust=0.5))
+    
+    return(pg) # for multiplot
+}
+
+multiBarPlot_RNAseq <- function(pdfl, rdfl) {
+    # pdfl, a list of protein data frames
+    #rdfl, a list of RNAseq data frames
+    pl <- NULL
+    rspls <- names(rdfl)
+    for (nm in names(pdfl)) {
+        sym <- unlist(mget(rownames(pdfl[[nm]]), eacc2sym, ifnotfound=unlist(mget(rownames(pdfl[[nm]]), eBBacc2sym, ifnotfound=rownames(pdfl[[nm]])))))
+        rownames(pdfl[[nm]]) <- sym
+
+        pl[[paste(nm, 'prot')]] <- gplot_barplot_RNAseq(pdfl[[nm]], 'Protein')
+        pl[[paste(nm, 'rna')]] <- gplot_barplot_RNAseq(rdfl[[nm]], 'Transcript')
+        rspls <- rspls[!rspls %in% nm]
+    }
+
+    for (rnm in rspls) {
+        pl[[rnm]] <- gplot_barplot_RNAseq(rdfl[[rnm]])
+    }
+
+    return(pl)
+}
+
+
+
+## ==== This function taken from the web ====
+# Multiple plot function
+#
+# ggplot objects can be passed in ..., or to plotlist (as a list of ggplot objects)
+# - cols:   Number of columns in layout
+# - layout: A matrix specifying the layout. If present, 'cols' is ignored.
+#
+# If the layout is something like matrix(c(1,2,3,3), nrow=2, byrow=TRUE),
+# then plot 1 will go in the upper left, 2 will go in the upper right, and
+# 3 will go all the way across the bottom.
+#
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+    library(grid)
+
+    # Make a list from the ... arguments and plotlist
+    plots <- c(list(...), plotlist)
+
+    numPlots = length(plots)
+
+    # If layout is NULL, then use 'cols' to determine layout
+    if (is.null(layout)) {
+        # Make the panel
+        # ncol: Number of columns of plots
+        # nrow: Number of rows needed, calculated from # of cols
+        layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                         ncol = cols, nrow = ceiling(numPlots/cols))
+    }
+
+    if (numPlots==1) {
+        print(plots[[1]])
+
+    } else {
+        # Set up the page
+        grid.newpage()
+        pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+        # Make each plot, in the correct location
+        for (i in 1:numPlots) {
+        # Get the i,j matrix positions of the regions that contain this subplot
+            matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+            print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                            layout.pos.col = matchidx$col))
+        }
+    }
+}
+
+
+@ 
+\end{document}
